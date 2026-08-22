@@ -1,0 +1,149 @@
+alert_task:
+  description: >
+    Analyze this scanner transcript for active/planned roadway traffic enforcement.
+    Transcript:
+    {transcript}
+
+    Output contract:
+    - If enforcement is present: exactly one sentence starting with 'ALERT:'
+      and include every location mentioned verbatim.
+    - Otherwise: exactly the word IGNORE.
+    - No extra lines or explanation.
+  expected_output: >
+    Either 'IGNORE' or a single 'ALERT: ...' sentence with verbatim locations.
+  agent: alert_specialist
+
+intel_task:
+  description: >
+    Extract structured dispatch intel from this scanner transcript.
+    Transcript:
+    {transcript}
+
+    Return ONLY one JSON object with keys:
+    call_types, priority, codes, units, locations, pois, summary.
+    Use empty arrays/strings when unknown. Copy locations/POIs verbatim.
+  expected_output: >
+    A single JSON object with the intel schema fully populated.
+  agent: intel_specialist
+
+vet_task:
+  description: >
+    Vet the proposed alert against the original transcript.
+    Transcript:
+    {transcript}
+
+    Proposed alert (from the alert specialist):
+    Use the alert_task output from context.
+
+    Output exactly one token: VET_PASS or VET_FAIL.
+    Pass only for clear roadway traffic enforcement or immediate driving hazard.
+  expected_output: >
+    Exactly VET_PASS or VET_FAIL.
+  agent: vet_specialist
+  context:
+    - alert_task
+
+rank_task:
+  description: >
+    Rank scanner channel candidates for the driver.
+    Location context JSON:
+    {location_context}
+
+    Candidates JSON:
+    {channel_candidates}
+
+    Return ONLY compact JSON:
+    {"ranked":[{"id":"...","score":0-100,"reason":"..."}],"top_id":"..."}
+    Do not invent candidates that are not in the input list.
+  expected_output: >
+    Compact JSON ranking of the provided channel candidates.
+  agent: rank_specialist
+
+core_task:
+  description: >
+    Produce the final driver-facing package using all specialist outputs.
+    Route / tool context:
+    {route_context}
+
+    Transcript:
+    {transcript}
+
+    Use prior task outputs from context for alert, intel, vet, and rank results.
+
+    Return ONLY JSON with keys:
+    {
+      "nav_line": "short TTS sentence or USE CAUTION AHEAD",
+      "chat": {"response":"...","confidence":"high|medium|low","missing_data":[],"evidence":[]},
+      "alert": "ALERT:... or IGNORE",
+      "vet": "VET_PASS or VET_FAIL",
+      "intel": {},
+      "channels": {},
+      "manager_notes": "one short sentence on overall decision"
+    }
+    Use only facts present in the inputs. Never invent incidents or locations.
+  expected_output: >
+    A single JSON object combining nav, chat, alert, vet, intel, channels, and manager_notes.
+  agent: core_specialist
+  context:
+    - alert_task
+    - intel_task
+    - vet_task
+    - rank_task
+
+
+dev_task:
+  description: >
+    Perform development / process-upkeep analysis for the Scout stack.
+    Mode hint (optional): {dev_mode}
+    Focus request:
+    {dev_request}
+
+    Runtime context:
+    - transcript sample: {transcript}
+    - route context: {route_context}
+    - location context: {location_context}
+    - channel candidates: {channel_candidates}
+
+    Specialist pipeline outputs available in context (alert/intel/vet/rank/core).
+    You are ADMIN: complete this task without manager approval or extra agent rounds.
+    Prefer TASK-style structure (REVIEW, IMPLEMENT, DEBUG, PROCESS, REFACTOR, TEST, DOCS).
+    Stay local-only: no cloud services, no invented secrets, no recursive agent calls.
+    Name concrete file paths under the Desktop scout/llm projects when relevant.
+    Return one final brief; do not request follow-up tasks from other agents.
+  expected_output: >
+    A structured development brief with findings, concrete next steps or patches,
+    verification commands, and rollback notes when process changes are proposed.
+  agent: dev_specialist
+  context:
+    - alert_task
+    - intel_task
+    - vet_task
+    - rank_task
+    - core_task
+
+manager_synthesis_task:
+  description: >
+    As local manager, review the specialist pipeline outputs and emit the final
+    operational brief for the driver. Prefer the core specialist package when it
+    is valid JSON; otherwise repair it into valid JSON using only provided facts.
+
+    Transcript: {transcript}
+    Route context: {route_context}
+    Location context: {location_context}
+
+    Incorporate alert, intel, vet, rank, core, and dev outputs from prior tasks.
+    You are ADMIN for final synthesis only — do not re-delegate or re-query specialists.
+    If core JSON is valid, prefer it; else repair using only provided facts.
+    Return the same final JSON schema as core_task, plus "manager_model": "local",
+    "admin_notes": "one short sentence", and "dev_summary": short string from dev_task.
+    No markdown fences. No cloud services. No external lookups. No recursive calls.
+  expected_output: >
+    Final local-only JSON operational brief for the driver.
+  agent: local_manager
+  context:
+    - alert_task
+    - intel_task
+    - vet_task
+    - rank_task
+    - core_task
+    - dev_task
