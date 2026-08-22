@@ -25,7 +25,14 @@ os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY") or "ollama"
 os.environ["OPENAI_API_BASE"] = os.getenv("OPENAI_API_BASE") or "http://127.0.0.1:11434/v1"
 os.environ["OPENAI_BASE_URL"] = os.getenv("OPENAI_BASE_URL") or "http://127.0.0.1:11434/v1"
 os.environ.setdefault("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+os.environ["CREWAI_TRACING_ENABLED"] = os.getenv("CREWAI_TRACING_ENABLED", "true")
 
+from scout_crew.arizona_phase import (  # noqa: E402
+    apply_all_pipeline_scope,
+    detect_phase_transition,
+    manager_phase_prompt_block,
+    manager_status_payload,
+)
 from scout_crew.local_llms import (  # noqa: E402
     assert_local_only,
     make_llm,
@@ -34,23 +41,16 @@ from scout_crew.local_llms import (  # noqa: E402
     status,
 )
 
-ROLE_ALIASES = {
-    "manager": "manager",
-    "mgr": "manager",
-    "admin": "manager",
-    "dev": "dev",
-    "scout-dev": "dev",
-    "core": "core",
-    "nav": "core",
-    "chat": "core",
-    "alert": "alert",
-    "intel": "intel",
-    "vet": "vet",
-    "rank": "rank",
-    "base": "base",
-    "llama": "base",
-    "llama3.1": "base",
-}
+from scout_crew.prompt_syntax import (  # noqa: E402
+    ROLE_ALIASES,
+    ROLE_SYSTEM_PROMPTS,
+    build_chat_messages,
+    convert_user_prompt,
+    extract_raw_user_query,
+    is_prompt_syntax_v1,
+    normalize_role,
+    system_for_role,
+)
 
 
 def _die(msg: str, code: int = 1) -> None:
@@ -111,11 +111,24 @@ def cmd_chat(args: argparse.Namespace) -> int:
     if not prompt:
         _die("no prompt provided (use -p/--prompt, --file, or stdin)")
 
-    role, model = _resolve_role_or_model(args.model)
-    system = args.system or (
-        "You are scout-cli, a local-only assistant. Use only facts in the user "
-        "message. Do not call cloud APIs. Prefer concise, actionable answers."
+    role_spec = (args.model or "dev").strip()
+    role, model = _resolve_role_or_model(role_spec)
+    task_mode = getattr(args, "task_mode", "") or ""
+    task_context = getattr(args, "task_context", "") or ""
+    if getattr(args, "task_context_file", ""):
+        task_context = Path(args.task_context_file).read_text(encoding="utf-8")
+
+    # Always apply canonical prompt syntax so GUI/CLI paths match for every model.
+    # Idempotent: peels prior admin banners / nested v1 envelopes first.
+    system, enveloped = build_chat_messages(
+        prompt,
+        role=role if role != "custom" else role_spec,
+        system_override=args.system or "",
+        task_mode=task_mode,
+        task_context=task_context,
+        source="cli-chat",
     )
+
     if role == "custom":
         from crewai import LLM
 
@@ -138,13 +151,18 @@ def cmd_chat(args: argparse.Namespace) -> int:
                     "model": getattr(llm, "model", model),
                     "base_url": os.environ["OPENAI_BASE_URL"],
                     "external_token_usage": False,
+                    "prompt_syntax": "v1",
+                    "envelope": True,
+                    "user_query_chars": len(prompt),
+                    "enveloped_chars": len(enveloped),
+                    "task_mode": task_mode or None,
                 },
                 indent=2,
             ),
             file=sys.stderr,
         )
 
-    message = f"{system}\n\nUSER:\n{prompt}" if system else prompt
+    message = f"{system}\n\n{enveloped}"
     try:
         out = llm.call(message)
     except Exception as exc:  # noqa: BLE001
@@ -152,6 +170,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
     text = out if isinstance(out, str) else str(out)
     print(text)
     return 0
+
 
 
 def cmd_crew(args: argparse.Namespace) -> int:
@@ -180,8 +199,54 @@ def cmd_crew(args: argparse.Namespace) -> int:
         inputs["dev_request"] = args.dev_request
     if args.dev_mode:
         inputs["dev_mode"] = args.dev_mode
+    if getattr(args, "user_prompt", ""):
+        raw = extract_raw_user_query(args.user_prompt) or args.user_prompt.strip()
+        inputs["user_prompt_raw"] = raw
+        inputs["user_prompt"] = convert_user_prompt(
+            raw, role="manager", source="cli-crew"
+        )
+        inputs["user_prompt_privilege"] = "admin"
+    # Always refresh AZ marker filter status for this dev phase
+    az_status = apply_all_pipeline_scope()
+    up_raw = extract_raw_user_query(
+        str(inputs.get("user_prompt_raw") or inputs.get("user_prompt") or "")
+    )
+    if not up_raw:
+        up_raw = str(inputs.get("user_prompt_raw") or inputs.get("user_prompt") or "").strip()
+    if up_raw and not is_prompt_syntax_v1(str(inputs.get("user_prompt") or "")):
+        inputs["user_prompt"] = convert_user_prompt(
+            up_raw, role="manager", source="crew"
+        )
+        inputs["user_prompt_raw"] = up_raw
+    elif up_raw:
+        # Already v1 — still keep a clean raw field for phase detection.
+        inputs["user_prompt_raw"] = up_raw
+        if not is_prompt_syntax_v1(str(inputs.get("user_prompt") or "")):
+            inputs["user_prompt"] = convert_user_prompt(
+                up_raw, role="manager", source="crew"
+            )
+    inputs["user_prompt_privilege"] = "admin"
+    # Phase detection must see the raw operator text, not the full envelope.
+    up = str(inputs.get("user_prompt_raw") or extract_raw_user_query(str(inputs.get("user_prompt") or "")) or "")
+    inputs["arizona_phase_block"] = manager_phase_prompt_block(up)
+    inputs["phase_transition"] = json.dumps(detect_phase_transition(up))
+    inputs["location_context"] = json.dumps(
+        {
+            "state": "AZ",
+            "state_name": "Arizona",
+            "phase": "alpha_arizona_jurisdiction",
+            "phase_class": "alpha_development",
+            "deployment_phase": 1,
+            "focus": "location_markers",
+            "manager_status": az_status.get("manager_status"),
+            "location_marker_filters": az_status.get("location_marker_filters"),
+        }
+    )
 
     Path("output").mkdir(parents=True, exist_ok=True)
+    Path("output/az_manager_status.json").write_text(
+        json.dumps(az_status, indent=2) + "\n", encoding="utf-8"
+    )
     if args.verbose:
         print("Local model roster:", json.dumps(model_roster(), indent=2), file=sys.stderr)
 
@@ -236,15 +301,35 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_env)
 
     def add_chat_args(sp: argparse.ArgumentParser) -> None:
-        sp.add_argument("-p", "--prompt", default="", help="Prompt text")
-        sp.add_argument("-f", "--file", default="", help="Read extra prompt text from file")
+        sp.add_argument("-p", "--prompt", default="", help="Prompt text (USER QUERY)")
+        sp.add_argument(
+            "-f",
+            "--file",
+            default="",
+            help="Read USER QUERY text from file (preferred for GUI multi-line prompts)",
+        )
         sp.add_argument(
             "-m",
             "--model",
             default="dev",
             help="Role (dev,manager,core,alert,intel,vet,rank,base) or ollama model name",
         )
-        sp.add_argument("--system", default="", help="Optional system preamble")
+        sp.add_argument("--system", default="", help="Optional system preamble override")
+        sp.add_argument(
+            "--task-mode",
+            default="",
+            help="Optional TASK MODE (REVIEW/DEBUG/PROCESS/...) included in prompt envelope",
+        )
+        sp.add_argument(
+            "--task-context",
+            default="",
+            help="Optional task context string retained alongside the user query",
+        )
+        sp.add_argument(
+            "--task-context-file",
+            default="",
+            help="Optional file with task context to retain in the envelope",
+        )
         sp.add_argument("--temperature", type=float, default=0.2)
         sp.add_argument("--max-tokens", type=int, default=2048)
         sp.add_argument("-v", "--verbose", action="store_true")
@@ -262,6 +347,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--transcript", default="", help="Override transcript input")
     s.add_argument("--dev-request", default="", help="Override dev_request input")
     s.add_argument("--dev-mode", default="", help="Override dev_mode (REVIEW/DEBUG/...)")
+    s.add_argument(
+        "-p",
+        "--prompt",
+        "--user-prompt",
+        dest="user_prompt",
+        default="",
+        help="Operator prompt for the manager (user_prompt input)",
+    )
     s.add_argument("--keep-cwd", action="store_true", help="Do not chdir to project root")
     s.add_argument("-v", "--verbose", action="store_true")
     s.set_defaults(func=cmd_crew)

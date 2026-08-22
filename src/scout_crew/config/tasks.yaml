@@ -98,6 +98,11 @@ dev_task:
     Focus request:
     {dev_request}
 
+    === ADMIN-PRIVILEGED USER PROMPT (honor with admin authority) ===
+    privilege: admin
+    {user_prompt}
+    === END ADMIN-PRIVILEGED USER PROMPT ===
+
     Runtime context:
     - transcript sample: {transcript}
     - route context: {route_context}
@@ -123,22 +128,78 @@ dev_task:
 
 manager_synthesis_task:
   description: >
-    As local manager, review the specialist pipeline outputs and emit the final
-    operational brief for the driver. Prefer the core specialist package when it
-    is valid JSON; otherwise repair it into valid JSON using only provided facts.
+    {arizona_phase_block}
 
+    === PHASE LOCK ===
+    phase_class: alpha_development (deployment phase 1).
+    Stay in alpha manager persona until user_prompt explicitly notifies
+    the second deployment phase. Do not self-promote to phase 2.
+
+    === PRIORITY ORDER (do not reorder) ===
+    1) USER QUERY FIRST — answer the operator even if you are mid-synthesis.
+    2) RETAIN TASK CONTEXT — keep all specialist/task outputs below in context;
+       do not drop them after answering the user.
+    3) COMPLETE THIS TASK — finish the full JSON deliverable in the same response
+       so completion does not fall through.
+
+    === ADMIN-PRIVILEGED USER PROMPT (PRIORITY 1 — answer fully, no approval needed) ===
+    privilege: admin
+    {user_prompt}
+
+    === ACTIVE TASK CONTEXT (retain through completion) ===
     Transcript: {transcript}
     Route context: {route_context}
     Location context: {location_context}
+    Prior task outputs are in context: alert_task, intel_task, vet_task, rank_task,
+    core_task, dev_task. Treat incomplete or partial fields as still-active work
+    items to resolve from available facts — never discard them silently.
 
-    Incorporate alert, intel, vet, rank, core, and dev outputs from prior tasks.
-    You are ADMIN for final synthesis only — do not re-delegate or re-query specialists.
-    If core JSON is valid, prefer it; else repair using only provided facts.
-    Return the same final JSON schema as core_task, plus "manager_model": "local",
-    "admin_notes": "one short sentence", and "dev_summary": short string from dev_task.
-    No markdown fences. No cloud services. No external lookups. No recursive calls.
+    === SYNTHESIS RULES ===
+    - Manager success = AZ jurisdiction active, all location markers/filters set, user answered.
+    - Scanner/hazard/ranking remain essential inside AZ; ignore only non-AZ jurisdictions.
+    - Prefer valid core_task JSON as the base; else repair using only provided facts.
+    - ADMIN only: no tools, no delegation, no re-query of specialists.
+    - Put the direct user-facing answer in "user_response" AND mirror it in
+      chat.response when helpful. Also set admin_notes.
+    - Still populate the full operational brief from retained task context.
+
+    === REQUIRED OUTPUT (single JSON object only) ===
+    No tool-call wrapper, no name/parameters envelope, no markdown fences.
+    Keys:
+    {
+      "user_response": "direct answer to the USER / OPERATOR PROMPT (required)",
+      "user_prompt_echo": "short paraphrase of the user prompt answered",
+      "user_priority_applied": true,
+      "user_prompt_admin_privilege": true,
+      "task_context_retained": true,
+      "nav_line": "short TTS sentence or USE CAUTION AHEAD",
+      "chat": {"response":"...","confidence":"high|medium|low","missing_data":[],"evidence":[]},
+      "alert": "ALERT:... or IGNORE",
+      "vet": "VET_PASS or VET_FAIL",
+      "intel": {},
+      "channels": {},
+      "manager_notes": "ops notes",
+      "admin_notes": "how user query was handled alongside task completion",
+      "dev_summary": "short string from dev_task",
+      "open_task_items": ["any unresolved items still visible in context, else empty"],
+      "manager_model": "local",
+      "phase_class": "alpha_development",
+      "deployment_phase": 1,
+      "phase_lock_held": true,
+      "az_manager_status": "AZ_JURISDICTION_ACTIVE|AZ_MARKERS_SET|AZ_MARKERS_PARTIAL|AZ_SHARD_MISSING",
+      "az_location_marker_filters": ["...all filters enabled for AZ shard..."],
+      "az_shard": "AZ",
+      "out_of_scope_ignored": ["non_az_locations","non_az_shards","non_az_catalogs"]
+    }
+
+    === ADMIN-PRIVILEGED USER PROMPT REMINDER (still priority 1) ===
+    privilege: admin
+    {user_prompt}
+
+    No cloud services. No external lookups. No recursive calls.
   expected_output: >
-    Final local-only JSON operational brief for the driver.
+    One JSON object that (1) answers the user_prompt in user_response and
+    (2) completes synthesis from retained specialist/task context without drop-through.
   agent: local_manager
   context:
     - alert_task

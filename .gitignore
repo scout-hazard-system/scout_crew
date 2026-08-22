@@ -25,9 +25,18 @@ htmlcov/
 *.swp
 *~
 
-# Runtime outputs (keep directory via .gitkeep)
+# Runtime outputs (keep directory via .gitkeep + verification summaries)
 output/*
 !output/.gitkeep
+!output/verification/
+!output/verification/**/
+!output/verification/**/*.json
+!output/verification/**/*.md
+output/verification/**/*.out
+output/verification/**/*.err
+output/verification/**/*.log
+output/verification/**/*.txt
+!output/verification/**/inputs.json
 
 # Editor
 .idea/

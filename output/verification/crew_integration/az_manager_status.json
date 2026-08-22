@@ -1,0 +1,125 @@
+{
+  "phase": "alpha_arizona_jurisdiction",
+  "phase_class": "alpha_development",
+  "deployment_phase": 1,
+  "phase_lock": {
+    "enabled": true,
+    "persona": "alpha_development_manager",
+    "hold_until": "explicit_prompt_notifies_second_deployment_phase",
+    "release_triggers": [
+      "second deployment phase",
+      "deployment phase 2",
+      "phase 2 deployment",
+      "begin deployment phase 2",
+      "exit alpha development",
+      "promote from alpha",
+      "DEPLOYMENT_PHASE=2",
+      "phase_class=beta",
+      "phase_class=production"
+    ],
+    "note": "Manager remains in alpha-development mindset/persona and Arizona jurisdiction scope until an operator prompt explicitly notifies the second deployment phase."
+  },
+  "jurisdiction": "AZ",
+  "jurisdiction_name": "Arizona",
+  "lock_state": true,
+  "all_facets_functional": true,
+  "facets": {
+    "scanner_streams": {
+      "enabled": true,
+      "scope": "AZ_only",
+      "essential": true
+    },
+    "hazard_feeds": {
+      "enabled": true,
+      "scope": "AZ_only",
+      "essential": true
+    },
+    "broadcastify_ranking": {
+      "enabled": true,
+      "scope": "AZ_only",
+      "essential": true
+    },
+    "location_markers": {
+      "enabled": true,
+      "scope": "AZ_only",
+      "essential": true,
+      "set_all": true
+    },
+    "map_shards": {
+      "enabled": true,
+      "scope": "AZ_only",
+      "essential": true
+    },
+    "waze_clusters": {
+      "enabled": true,
+      "scope": "AZ_only",
+      "essential": false
+    },
+    "crewai_pipeline": {
+      "enabled": true,
+      "scope": "AZ_only",
+      "essential": true
+    }
+  },
+  "scanner_essential_within_az": true,
+  "location_markers_enabled": true,
+  "location_marker_filters": [
+    "mile marker",
+    "exit",
+    "northbound",
+    "southbound",
+    "eastbound",
+    "westbound",
+    "on-ramp",
+    "off-ramp",
+    "shoulder",
+    "highway",
+    "I-10",
+    "I-17",
+    "I-19",
+    "I-40",
+    "I-8",
+    "US-60",
+    "US-93",
+    "SR-51",
+    "SR-101",
+    "SR-202",
+    "junction",
+    "mp",
+    "milepost"
+  ],
+  "filters_applied_count": 23,
+  "az_shard_paths": [
+    "/home/gibi/Desktop/vlm_text_map_shards/AZ",
+    "/home/gibi/Desktop/vlm_text_map_shards_chunked/AZ"
+  ],
+  "az_filter_files": [
+    "/home/gibi/Desktop/vlm_text_map_shards/AZ/location_marker_filters.json",
+    "/home/gibi/Desktop/vlm_text_map_shards_chunked/AZ/location_marker_filters.json"
+  ],
+  "az_shard_ready": true,
+  "catalog": {
+    "az_catalog_exists": true,
+    "az_catalog": "/home/gibi/Desktop/stack/config/broadcastify_national_shards/broadcastify_channels.us.az.json",
+    "active_catalog": "/home/gibi/Desktop/stack/config/broadcastify_channels.active.json",
+    "scope_file": "/home/gibi/Desktop/stack/config/jurisdiction_scope.active.json",
+    "active_catalog_updated": true,
+    "az_channel_count": 3,
+    "scope_file_written": true
+  },
+  "vehicle_stack_env": {
+    "updated": true,
+    "path": "/home/gibi/Desktop/stack/config/vehicle_stack.env",
+    "backup": "/home/gibi/Desktop/stack/config/vehicle_stack.env.bak_pre_az",
+    "broadcastify_channels_file": "/home/gibi/Desktop/stack/config/broadcastify_channels.active.json",
+    "selector_state": "AZ",
+    "selector_city": "Phoenix"
+  },
+  "out_of_scope": [
+    "non_az_locations",
+    "non_az_shards",
+    "non_az_catalogs"
+  ],
+  "manager_status": "AZ_JURISDICTION_ACTIVE",
+  "note": "All pipelines/catalogs/facets operate within Arizona only. Scanner and hazard data are essential inside AZ jurisdictions."
+}

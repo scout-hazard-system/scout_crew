@@ -10,9 +10,15 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
+import os as _os
+_os.environ.setdefault("CREWAI_TRACING_ENABLED", "true")
+if _os.getenv("CREWAI_TRACING_ENABLED", "true").lower() in {"1", "true", "yes", "on"}:
+    _os.environ["CREWAI_TRACING_ENABLED"] = "true"
 
+from scout_crew.arizona_phase import manager_phase_prompt_block
 from scout_crew.crew import ScoutCrew
 from scout_crew.local_llms import model_roster, status
+from scout_crew.prompt_syntax import convert_user_prompt, extract_raw_user_query
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
@@ -22,21 +28,25 @@ DEFAULT_TRANSCRIPT = (
 )
 
 DEFAULT_ROUTE_CONTEXT = (
-    "origin 48.5126,-122.6127; destination 48.4982,-122.6361; "
-    "alternatives=2; shortest_km=7.1; fastest_min=14; "
-    "waze_hazards=ok; tool_observations.alerts=[]"
+    "origin 33.4484,-112.0740; destination 33.4942,-111.9261; "
+    "alternatives=2; shortest_km=18.4; fastest_min=22; "
+    "waze_hazards=ok; jurisdiction=AZ; tool_observations.alerts=[]"
 )
 
 DEFAULT_LOCATION_CONTEXT = {
-    "city": "Anacortes",
-    "state": "WA",
+    "city": "Phoenix",
+    "state": "AZ",
+    "state_name": "Arizona",
+    "county": "Maricopa County",
     "desired_types": ["law", "dispatch"],
+    "phase": "alpha_arizona_jurisdiction",
+    "focus": "arizona_jurisdiction",
 }
 
 DEFAULT_CHANNEL_CANDIDATES = [
-    {"id": "a", "name": "Skagit County Law Dispatch", "state": "WA"},
-    {"id": "b", "name": "Miami Fire Tac 3", "state": "FL"},
-    {"id": "c", "name": "WSDOT Northwest Traffic", "state": "WA"},
+    {"id": "a", "name": "Phoenix Police", "state": "AZ"},
+    {"id": "b", "name": "Coconino South Sheriff, DPS and Forest Service", "state": "AZ"},
+    {"id": "c", "name": "Arizona DPS", "state": "AZ"},
 ]
 
 
@@ -47,13 +57,36 @@ def _default_inputs() -> dict:
         "location_context": json.dumps(DEFAULT_LOCATION_CONTEXT),
         "channel_candidates": json.dumps(DEFAULT_CHANNEL_CANDIDATES),
         "current_year": str(datetime.now().year),
-        "topic": "local scout traffic operations",
+        "topic": "alpha arizona jurisdiction operations",
         "dev_mode": "PROCESS",
         "dev_request": (
-            "Review local Scout crew health and propose a short upkeep checklist "
-            "for models, Ollama, and crewai run. Note any process gaps."
+            "Alpha development: hold AZ-only jurisdiction with all facets functional. "
+            "Scanner/hazard/ranking essential inside AZ. "
+            "Stay in alpha until explicit second deployment phase prompt. "
+            "Checklist for AZ jurisdiction ops + phase lock."
+        ),
+"user_prompt": convert_user_prompt(
+            "Alpha development check: confirm phase_class=alpha_development is held, "
+            "Arizona jurisdiction is active, AZ marker filters are set, and scanner/hazard "
+            "remain essential inside AZ only. Do not leave alpha unless this prompt "
+            "explicitly starts deployment phase 2. Answer first, then finish the brief.",
+            role="manager",
+            source="defaults",
+        ),
+        "user_prompt_raw": (
+            "Alpha development check: confirm phase_class=alpha_development is held, "
+            "Arizona jurisdiction is active, AZ marker filters are set, and scanner/hazard "
+            "remain essential inside AZ only. Do not leave alpha unless this prompt "
+            "explicitly starts deployment phase 2. Answer first, then finish the brief."
+        ),
+        "user_prompt_privilege": "admin",
+        "prompt_syntax": "v1",
+        "arizona_phase_block": manager_phase_prompt_block(
+            "Alpha development check: hold alpha until second deployment phase is explicitly announced."
         ),
     }
+
+
 
 
 def _load_inputs_from_argv() -> dict:
@@ -69,6 +102,31 @@ def _load_inputs_from_argv() -> dict:
                     inputs[key] = json.dumps(value)
                 else:
                     inputs[key] = value
+    # Normalize any loaded user_prompt into PROMPT SYNTAX v1 (idempotent).
+    # Prefer explicit user_prompt from the file when present; do not keep a
+    # stale default user_prompt_raw that would shadow a loaded banner/envelope.
+    loaded_up = str(inputs.get("user_prompt") or "")
+    loaded_raw = str(inputs.get("user_prompt_raw") or "")
+    # If user_prompt looks like a banner/envelope (or differs from default raw),
+    # peel from user_prompt first.
+    candidate = loaded_up or loaded_raw
+    if loaded_raw and loaded_up and loaded_raw not in loaded_up and not loaded_up.startswith(
+        "==="
+    ):
+        # File supplied a clean raw plus unrelated wrapped prompt — trust raw.
+        candidate = loaded_raw
+    elif loaded_up.startswith("===") or "USER QUERY" in loaded_up or "ADMIN-PRIVILEGED" in loaded_up:
+        candidate = loaded_up
+    elif loaded_raw:
+        candidate = loaded_raw
+    raw = extract_raw_user_query(candidate)
+    if raw:
+        inputs["user_prompt_raw"] = raw
+        inputs["user_prompt"] = convert_user_prompt(
+            raw, role="manager", source="main"
+        )
+        inputs["user_prompt_privilege"] = "admin"
+        inputs["prompt_syntax"] = "v1"
     return inputs
 
 

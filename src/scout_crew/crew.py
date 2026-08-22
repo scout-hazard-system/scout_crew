@@ -15,15 +15,16 @@ from scout_crew.local_llms import assert_local_only, make_llm
 
 
 def _with_policy_text(config: dict, *, admin: bool) -> dict:
-    """Copy agent YAML config and append hard anti-recursion (+ admin) rules."""
+    """Copy agent YAML config and append anti-recursion (+ admin privilege) rules."""
+    from scout_crew.admin_policy import ADMIN_AUTHORITY, USER_PROMPT_ADMIN_PRIVILEGE
+
     cfg = dict(config)
     backstory = str(cfg.get("backstory", "")).rstrip()
-    extra = ANTI_RECURSION_RULES
     if admin:
-        from scout_crew.admin_policy import ADMIN_AUTHORITY
-
-        extra = ADMIN_AUTHORITY + "\n\n" + extra
-    cfg["backstory"] = f"{backstory}\n\n{extra}"
+        parts = [ADMIN_AUTHORITY, USER_PROMPT_ADMIN_PRIVILEGE, ANTI_RECURSION_RULES]
+    else:
+        parts = [ANTI_RECURSION_RULES]
+    cfg["backstory"] = backstory + chr(10) + chr(10) + (chr(10) + chr(10)).join(parts)
     return cfg
 
 
@@ -48,7 +49,7 @@ class ScoutCrew:
     @agent
     def local_manager(self) -> Agent:
         # Admin: synthesizes final brief; may one-hop consult specialists only.
-        return self._build_agent("local_manager", "manager", temperature=0.1, max_tokens=2048)
+        return self._build_agent("local_manager", "manager", temperature=0.1, max_tokens=3072)
 
     @agent
     def dev_specialist(self) -> Agent:

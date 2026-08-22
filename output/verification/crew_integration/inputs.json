@@ -1,0 +1,11 @@
+{
+  "transcript": "Unit 12 Phoenix PD, traffic stop on I-10 eastbound near 7th Ave, radar enforcement in progress, vehicle pulled over at Shell station.",
+  "route_context": "origin 33.4484,-112.0740; destination 33.4484,-112.0740; alternatives=1; shortest_km=0.0; fastest_min=0; waze_hazards=ok; jurisdiction=AZ; tool_observations.alerts=[]",
+  "location_context": "{\"city\": \"Phoenix\", \"state\": \"AZ\", \"state_name\": \"Arizona\", \"county\": \"Maricopa County\", \"desired_types\": [\"law\", \"dispatch\"], \"phase\": \"alpha_arizona_jurisdiction\", \"phase_class\": \"alpha_development\", \"deployment_phase\": 1, \"focus\": \"arizona_jurisdiction\"}",
+  "channel_candidates": "[{\"id\": \"a\", \"name\": \"Phoenix Police\", \"state\": \"AZ\"}, {\"id\": \"b\", \"name\": \"Arizona DPS\", \"state\": \"AZ\"}, {\"id\": \"c\", \"name\": \"Maricopa County Sheriff\", \"state\": \"AZ\"}]",
+  "dev_mode": "PROCESS",
+  "dev_request": "Integration test: confirm AZ-only scope, marker filters held, and list one process risk if any. Keep brief.",
+  "user_prompt": "Integration check: answer first with CREW_INTEGRATION_OK, confirm phase_class=alpha_development and AZ jurisdiction active, then finish the brief.",
+  "user_prompt_raw": "Integration check: answer first with CREW_INTEGRATION_OK, confirm phase_class=alpha_development and AZ jurisdiction active, then finish the brief.",
+  "user_prompt_privilege": "admin"
+}

@@ -1,0 +1,7 @@
+{
+  "defaults_v1": true,
+  "cli_p_raw": "Operator: report AZ marker count.",
+  "gui_double_markers": 1,
+  "legacy_raw": "Legacy crew prompt",
+  "fails": []
+}

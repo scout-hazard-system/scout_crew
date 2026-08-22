@@ -6,9 +6,21 @@ Local-only [CrewAI](https://crewai.com) multi-agent system for on-device **scout
 - Zero cloud LLM token usage (OpenAI-compatible traffic forced to `127.0.0.1:11434`)
 - Role-specialized scout models + admin manager / scout-dev
 - Sequential pipeline with anti-recursion guards
-- CLI + desktop GUI with integrated terminal
+- PROMPT SYNTAX v1 envelopes for every user prompt (CLI + GUI + crew)
+- Arizona **alpha** jurisdiction lock (all facets on, non-AZ out of scope)
+- CLI + desktop GUI (admin/core chat + Dev Conversations window)
 
 > Related model sources live outside this repo under `~/Desktop/llm/` (Modelfiles, build scripts).
+
+---
+
+## Docs map
+
+| Doc | Contents |
+|-----|----------|
+| **[SETUP.md](SETUP.md)** | Full install process, models, verify steps |
+| **[USAGE.md](USAGE.md)** | CLI/GUI reference, inputs/outputs, troubleshooting |
+| **[AGENTS.md](AGENTS.md)** | CrewAI patterns for coding assistants |
 
 ---
 
@@ -35,125 +47,125 @@ Local-only [CrewAI](https://crewai.com) multi-agent system for on-device **scout
 | Rank | `scout-rank` |
 | Fallback | `llama3.1` |
 
-Build / refresh scout-dev (from sibling llm tree):
-
 ```bash
 ollama create scout-dev -f ~/Desktop/llm/dev/Modelfile.scout-dev
-# or full set:
-bash ~/Desktop/llm/build/build_llm_set.sh
+# or: bash ~/Desktop/llm/build/build_llm_set.sh
 ```
 
 ---
 
-## Install
+## Install (short)
+
+Full detail: **[SETUP.md](SETUP.md)**.
 
 ```bash
 cd ~/Desktop/scout_crew
-cp .env.example .env          # already local-only defaults
-crewai install                # creates .venv + installs deps
-# optional PATH shims (if not already linked):
+cp -n .env.example .env
+crewai install
 ln -sfn "$(pwd)/bin/scout" ~/.local/bin/scout
 ln -sfn "$(pwd)/bin/scout-gui" ~/.local/bin/scout-gui
+scout status    # ollama_up true, external_token_usage false
 ```
 
-Desktop launcher (Pop!_OS / COSMIC):
-
-- `~/Desktop/Scout-Crew.desktop`
-- `~/.local/share/applications/scout-crew.desktop`
-
-If the desktop icon is blocked, right-click → **Allow Launching**, or run `scout-gui`.
+Desktop launcher: `~/Desktop/Scout-Crew.desktop` (Allow Launching if blocked).
 
 ---
 
 ## Quick start
 
 ```bash
-# Health
-scout status
-scout roster
-scout models
+scout status && scout roster
 
-# One-shot local chat (admin dev model)
-scout chat -m dev -p "Reply with LOCAL_OK"
-scout dev -p "TASK: PROCESS\nGive a 5-step Ollama health checklist"
+# One-shot local chat (PROMPT SYNTAX v1 applied automatically)
+scout chat -m manager -p "Reply with PROMPT_OK" -v
+scout dev --task-mode DEBUG -p "Ping scout-dev"
 
-# Full multi-agent pipeline
+# Full multi-agent pipeline (AZ alpha defaults)
 scout crew -v
 
 # Desktop GUI
 scout-gui
-```
 
-Point other OpenAI-compatible tools at local Ollama:
-
-```bash
+# Route other OpenAI-compatible tools to Ollama
 eval "$(scout env)"
 ```
 
 ---
 
-## Usage
-
-See **[USAGE.md](USAGE.md)** for full CLI flags, GUI walkthrough, inputs JSON schema, outputs, troubleshooting, and architecture.
-
-### CLI cheat sheet
-
-| Command | Purpose |
-|---------|---------|
-| `scout status` | Ollama up? role map? cloud usage flag |
-| `scout roster` | role → model |
-| `scout models` | installed tags |
-| `scout env` | shell exports for local routing |
-| `scout chat -m ROLE -p "..."` | single local completion |
-| `scout dev -p "..."` | admin shortcut → `scout-dev` |
-| `scout crew [-v] [--inputs file.json]` | full sequential crew |
-| `scout-gui` | desktop control plane + terminal |
-| `crewai run` | CrewAI project entry (same crew) |
-
-### Pipeline order
+## Pipeline order
 
 1. `alert_task` → scout-alert  
 2. `intel_task` → scout-intel  
-3. `vet_task` → scout-vet (uses alert context)  
+3. `vet_task` → scout-vet  
 4. `rank_task` → scout-rank  
 5. `core_task` → scout-core  
-6. `dev_task` → scout-dev **(admin, no manager approval)**  
+6. `dev_task` → scout-dev **(admin)**  
 7. `manager_synthesis_task` → llama3.1 **(admin final brief)**  
 
-### Outputs
+User prompts are **admin-privileged**: answer first, retain task context, finish deliverable (no drop-through).
 
-| File | Producer |
+---
+
+## Prompt syntax v1
+
+Every chat/dev/crew user prompt is converted to a canonical envelope:
+
+- `=== PROMPT SYNTAX v1 ===`
+- `=== USER QUERY (ADMIN-PRIVILEGED) ===` … `=== END USER QUERY ===`
+- optional `TASK MODE` / `TASK CONTEXT`
+- trailing reminder for small local models
+
+Conversion is **idempotent** (raw, legacy admin banner, or already-v1 input peels cleanly). GUI writes raw text to `output/gui_*_prompt.txt`; CLI applies the envelope once.
+
+---
+
+## Alpha phase (Arizona)
+
+Until an explicit **second deployment phase** prompt:
+
+- `phase_class=alpha_development`, `deployment_phase=1`
+- All pipelines/catalogs scoped to **AZ only**
+- Scanner/hazard/ranking **essential inside AZ**
+- Location marker filters set on the AZ shard
+
+Module: `src/scout_crew/arizona_phase.py`.
+
+---
+
+## Outputs
+
+| Path | Producer |
 |------|----------|
-| `output/local_brief.json` | manager synthesis |
+| `output/local_brief.json` | manager synthesis (when written) |
 | `output/dev_brief.md` | scout-dev |
-| `output/gui_inputs.json` | written by GUI when you run crew |
+| `output/az_manager_status.json` | AZ scope apply status |
+| `output/gui_inputs.json` | GUI crew run |
+| `output/verification/` | committed smoke/integration summaries |
+
+Runtime `output/*` is gitignored except `.gitkeep` and `output/verification/**`.
 
 ---
 
 ## Architecture (short)
 
-- **Process:** sequential (not hierarchical) to avoid manager re-query loops  
-- **Admins:** `local_manager`, `dev_specialist` — optional one-hop consult; never admin↔admin delegation  
-- **Specialists:** no delegation; low `max_iter`  
-- **Guards:** `assert_local_only()`, acyclic task context DAG, `planning=False`, `memory=False`  
-- **Key modules:**  
-  - `src/scout_crew/local_llms.py` — Ollama roster / LLM factory  
-  - `src/scout_crew/admin_policy.py` — admin partition + anti-recursion  
-  - `src/scout_crew/crew.py` — CrewAI wiring  
-  - `src/scout_crew/cli.py` — `scout` CLI  
-  - `src/scout_crew/gui.py` — desktop GUI  
+- **Process:** sequential (not hierarchical) — avoids manager re-query loops  
+- **Admins:** `local_manager`, `dev_specialist` — no mutual approval; delegation off (prevents tool-JSON loops on local llama)  
+- **Specialists:** no delegation; tight `max_iter`  
+- **Guards:** `assert_local_only()`, acyclic task DAG, `planning=False`, `memory=False`  
+- **Key modules:** `local_llms.py`, `admin_policy.py`, `prompt_syntax.py`, `arizona_phase.py`, `crew.py`, `cli.py`, `gui.py`
 
 ---
 
 ## Safety / local-only
 
-- `.env` must keep `OPENAI_BASE_URL` / `OPENAI_API_BASE` on `127.0.0.1:11434`  
-- Dummy key `OPENAI_API_KEY=ollama` is intentional for OpenAI-compatible clients  
+- Keep `OPENAI_BASE_URL` / `OPENAI_API_BASE` on `127.0.0.1:11434`  
+- Dummy key `OPENAI_API_KEY=ollama` is intentional  
 - `assert_local_only()` refuses common cloud provider env keys  
-- Do not commit real API keys (`.env` is gitignored)
+- Do not commit real API keys (`.env` is gitignored)  
+- Trace links may include prompts — treat as sensitive  
 
 ---
 
 ## License / notes
 
-Project scaffold originated from CrewAI classic template; Scout-specific agents, local routing, CLI, and GUI are project code. CrewAI remains subject to its own license.
+Project scaffold originated from CrewAI classic template; Scout-specific agents, local routing, CLI, GUI, AZ phase, and prompt syntax are project code. CrewAI remains subject to its own license.

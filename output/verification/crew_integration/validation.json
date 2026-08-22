@@ -1,0 +1,59 @@
+{
+  "result": "PASS",
+  "failed": [],
+  "elapsed_s": 54.0,
+  "exit_code": 0,
+  "brief": {
+    "user_response": "CREW_INTEGRATION_OK",
+    "user_prompt_echo": "Integration check: confirm phase_class=alpha_development and AZ jurisdiction active",
+    "user_priority_applied": true,
+    "user_prompt_admin_privilege": true,
+    "task_context_retained": true,
+    "nav_line": "USE CAUTION AHEAD",
+    "alert": "ALERT: Unit 12 Phoenix PD conducting traffic stop on I-10 eastbound near 7th Ave, radar enforcement in progress at Shell station.",
+    "vet": "VET_PASS",
+    "admin_notes": "Confirmed phase_class=alpha_development and AZ jurisdiction active. Completed integration check.",
+    "phase_class": "alpha_development",
+    "deployment_phase": 1,
+    "phase_lock_held": true,
+    "az_manager_status": "AZ_JURISDICTION_ACTIVE",
+    "az_shard": "AZ",
+    "manager_model": "local",
+    "az_location_marker_filters": [
+      "mile marker",
+      "exit",
+      "northbound",
+      "southbound",
+      "eastbound",
+      "westbound",
+      "on-ramp",
+      "off-ramp",
+      "shoulder",
+      "highway",
+      "I-10",
+      "I-17",
+      "I-19",
+      "I-40",
+      "I-8",
+      "US-60",
+      "US-93",
+      "SR-51",
+      "SR-101",
+      "SR-202",
+      "junction",
+      "mp",
+      "milepost"
+    ],
+    "out_of_scope_ignored": [
+      "non_az_locations",
+      "non_az_shards",
+      "non_az_catalogs"
+    ]
+  },
+  "filter_count": 23,
+  "artifacts": {
+    "az_manager_status": true,
+    "dev_brief": true,
+    "crew_stdout": true
+  }
+}

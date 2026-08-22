@@ -24,6 +24,7 @@ export OPENAI_API_KEY="${OPENAI_API_KEY:-ollama}"
 export OPENAI_API_BASE="${OPENAI_API_BASE:-http://127.0.0.1:11434/v1}"
 export OPENAI_BASE_URL="${OPENAI_BASE_URL:-http://127.0.0.1:11434/v1}"
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
+export CREWAI_TRACING_ENABLED="${CREWAI_TRACING_ENABLED:-true}"
 case "${OPENAI_BASE_URL}" in
   *11434*|*localhost*|*127.0.0.1*) ;;
   *)
