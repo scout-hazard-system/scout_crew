@@ -1,9 +1,24 @@
+# Copyright 2026 Scout Project Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from __future__ import annotations
 
 from crewai import Agent, Crew, Process, Task
 from crewai.agents.agent_builder.base_agent import BaseAgent
 from crewai.project import CrewBase, agent, crew, task
 
+from scout_crew.tools.blackboard_tool import tools_for_role
 from scout_crew.admin_policy import (
     ADMIN_AGENT_KEYS,
     ANTI_RECURSION_RULES,
@@ -39,9 +54,14 @@ class ScoutCrew:
         admin = key in ADMIN_AGENT_KEYS
         config = _with_policy_text(self.agents_config[key], admin=admin)  # type: ignore[index]
         kwargs = agent_runtime_kwargs(key)
+        # Shared multi-machine blackboard tools (role-ACL enforced in tool/store).
+        # specialists/core -> write pipeline; manager -> summarize/rewrite pipeline;
+        # dev -> dev_debug only; hermes (external) would be read-only via tools_for_role.
+        bb_tools = tools_for_role(key)
         return Agent(
             config=config,  # type: ignore[arg-type]
             llm=make_llm(role_llm, temperature=temperature, max_tokens=max_tokens),
+            tools=bb_tools,
             verbose=True,
             **kwargs,
         )

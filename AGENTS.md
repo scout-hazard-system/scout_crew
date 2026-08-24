@@ -1,5 +1,7 @@
 # AGENTS.md — CrewAI Reference for AI Coding Assistants
 
+**License:** Apache License, Version 2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+
 > **Auto-generated** by `crewai create`. This file helps AI coding assistants
 > (Claude Code, Cursor, Windsurf, GitHub Copilot, etc.) write correct CrewAI code.
 > Keep it in your project root. To update, copy the latest version from the

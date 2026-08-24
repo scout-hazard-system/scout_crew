@@ -1,3 +1,17 @@
+# Copyright 2026 Scout Project Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Local-only LLM wiring for CrewAI via Ollama.
 
 All models are served by the local Ollama daemon at 127.0.0.1:11434.
@@ -19,14 +33,41 @@ OLLAMA_OPENAI_BASE = os.getenv("OPENAI_BASE_URL", f"{OLLAMA_HOST}/v1")
 
 # Role -> preferred Ollama model name (without provider prefix)
 ROLE_MODEL_PREFS: Dict[str, List[str]] = {
-    "manager": ["llama3.1", "llama3.1:latest"],
-    "core": ["scout-core1.0.5", "scout-core1.0.8", "scout-core1.0.7", "scout-core", "llama3.1"],
+    # Reasoning roles share the thinking-capable unified Hermes brain.
+    "manager": [
+        "scout-hermes-hc1.0.0",
+        "scout-hermes-hc1.1.0",
+        "scout-hermes-hc1.0.0-64k",
+        "llama3.1",
+    ],
+    "core": [
+        "scout-hermes-hc1.0.0",
+        "scout-hermes-hc1.1.0",
+        "scout-core1.0.5",
+        "scout-core",
+        "llama3.1",
+    ],
+    "dev": [
+        "scout-hermes-hc1.0.0",
+        "scout-hermes-hc1.1.0",
+        "scout-dev",
+        "scout-core1.0.5",
+        "llama3.1",
+    ],
+    # Specialists stay on narrow non-thinking contracts (latency path).
     "vet": ["scout-vet1.0.6", "scout-vet1.0.8", "scout-vet1.0.7", "scout-vet", "llama3.1"],
     "alert": ["scout-alert", "scout-vet1.0.6", "scout-vet1.0.8", "llama3.1"],
     "intel": ["scout-intel", "scout-vet1.0.6", "scout-vet1.0.8", "llama3.1"],
     "rank": ["scout-rank", "llama3.1"],
-    "dev": ["scout-dev", "scout-core1.0.5", "scout-core", "llama3.1"],
     "base": ["llama3.1", "llama3.1:latest"],
+    # Optional explicit hermes role
+    "hermes": [
+        "scout-hermes-hc1.0.0",
+        "scout-hermes-hc1.1.0",
+        "scout-hermes-hc1.0.0-64k",
+        "qwen3:8b",
+        "llama3.1",
+    ],
 }
 
 ENV_OVERRIDES = {
@@ -38,6 +79,7 @@ ENV_OVERRIDES = {
     "rank": "OLLAMA_MODEL_RANK",
     "dev": "OLLAMA_MODEL_DEV",
     "base": "OLLAMA_MODEL_BASE",
+    "hermes": "OLLAMA_MODEL_HERMES",
 }
 
 

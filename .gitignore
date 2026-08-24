@@ -42,3 +42,8 @@ output/verification/**/*.txt
 .idea/
 .vscode/
 *.code-workspace
+
+# Blackboard local DB (multi-machine server may use shared path)
+data/blackboard/*.db
+data/blackboard/*.db-*
+!data/blackboard/.gitkeep

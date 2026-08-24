@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from scout_crew.tools.blackboard_tool import tools_for_role
+"""Multi-machine categorized blackboard shared memory for Scout Crew."""
 
-__all__ = ["tools_for_role"]
+from scout_crew.blackboard.client import BlackboardClient
+from scout_crew.blackboard.store import CATEGORIES, ROLE_ACL
+
+__all__ = ["BlackboardClient", "CATEGORIES", "ROLE_ACL"]

@@ -1,5 +1,7 @@
 # Scout Crew — Usage Guide
 
+**License:** Apache License, Version 2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+
 This document covers day-to-day operation of the local Scout CrewAI stack: CLI, GUI, inputs/outputs, models, and troubleshooting.
 
 ---

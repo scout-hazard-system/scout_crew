@@ -1,5 +1,7 @@
 # Scout Crew — Setup Process
 
+**License:** Apache License, Version 2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+
 End-to-end setup for the **local-only** multi-agent Scout stack (CrewAI + Ollama).
 No cloud LLM tokens: all OpenAI-compatible traffic is forced to `http://127.0.0.1:11434/v1`.
 

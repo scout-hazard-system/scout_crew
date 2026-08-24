@@ -1,4 +1,18 @@
 #!/usr/bin/env python
+# Copyright 2026 Scout Project Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Scout Desktop GUI — CrewAI controls + integrated local terminal.
 
 All LLM traffic is forced through local Ollama (127.0.0.1:11434).
@@ -51,6 +65,11 @@ from PySide6.QtWidgets import (
 
 from scout_crew.local_llms import model_roster, status as llm_status
 from scout_crew.prompt_syntax import convert_user_prompt, extract_raw_user_query
+
+try:
+    from scout_crew.blackboard.client import BlackboardClient
+except Exception:  # pragma: no cover
+    BlackboardClient = None  # type: ignore
 
 DEFAULT_SCANNER_TRANSCRIPT = (
     "Unit 23 copy, running radar on I-5 northbound at mile marker 212, "
@@ -125,6 +144,14 @@ QLabel#badge {
   background: #052e16;
   color: #86efac;
   border: 1px solid #166534;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-weight: 600;
+}
+QLabel#badgeHermes {
+  background: #1e1b4b;
+  color: #c4b5fd;
+  border: 1px solid #5b21b6;
   border-radius: 999px;
   padding: 4px 10px;
   font-weight: 600;
@@ -514,11 +541,481 @@ class DevConversationWindow(QDialog):
             parent.set_response_transcript(last_user, out, source="dev-window exit=" + str(code))
 
 
+
+class HermesConversationPane(QWidget):
+    """Integrated Hermes-model chat (classic Hermes desktop can also be launched)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._proc: Optional[QProcess] = None
+        self._stdout: list[str] = []
+        self._stderr: list[str] = []
+        self._history: list[dict] = []
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+
+        header = QHBoxLayout()
+        title = QLabel("Hermes · scout-hermes-hc (Project Director)")
+        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #c4b5fd;")
+        self.status = QLabel("idle")
+        self.status.setObjectName("badgeHermes")
+        header.addWidget(title)
+        header.addStretch(1)
+        header.addWidget(self.status)
+        root.addLayout(header)
+
+        meta = QHBoxLayout()
+        meta.addWidget(QLabel("Model"))
+        self.model = QComboBox()
+        self.model.addItems([
+            "hermes",
+            "scout-hermes-hc1.0.0",
+            "scout-hermes-hc1.0.0-64k",
+            "scout-hermes-hc1.1.0",
+            "manager",
+            "core",
+        ])
+        self.model.setCurrentText("hermes")
+        meta.addWidget(self.model)
+        meta.addWidget(QLabel("Mode"))
+        self.mode = QComboBox()
+        self.mode.addItems([
+            "MANAGER", "DEV", "CORE", "PIPELINE", "ALERT", "CHAT", "NAV", "DEBUG", "PROCESS"
+        ])
+        self.mode.setCurrentText("MANAGER")
+        meta.addWidget(self.mode)
+        self.btn_classic = QPushButton("Launch classic Hermes GUI")
+        self.btn_classic.setObjectName("secondary")
+        self.btn_classic.clicked.connect(self.launch_classic_hermes)
+        meta.addWidget(self.btn_classic)
+        meta.addStretch(1)
+        root.addLayout(meta)
+
+        note = QLabel(
+            "Integrated chat uses local Ollama via scout CLI (PROMPT SYNTAX v1). "
+            "Classic Hermes opens the Electron desktop app (hermes desktop) with the same model config."
+        )
+        note.setStyleSheet("color: #94a3b8;")
+        note.setWordWrap(True)
+        root.addWidget(note)
+
+        self.transcript = QPlainTextEdit()
+        self.transcript.setReadOnly(True)
+        self.transcript.setFont(QFont("monospace", 11))
+        self.transcript.setPlaceholderText("Hermes conversation history…")
+        root.addWidget(self.transcript, 1)
+
+        self.input = QTextEdit()
+        self.input.setFixedHeight(110)
+        self.input.setPlaceholderText(
+            "Message Hermes Project Director (ADMIN-PRIVILEGED). Blackboard is read-only for hermes."
+        )
+        root.addWidget(self.input)
+
+        btns = QHBoxLayout()
+        self.btn_send = QPushButton("Send to Hermes")
+        self.btn_send.clicked.connect(self.send_message)
+        self.btn_stop = QPushButton("Stop")
+        self.btn_stop.setObjectName("danger")
+        self.btn_stop.setEnabled(False)
+        self.btn_stop.clicked.connect(self.stop_message)
+        self.btn_clear = QPushButton("Clear")
+        self.btn_clear.setObjectName("secondary")
+        self.btn_clear.clicked.connect(self.clear_history)
+        self.btn_bb = QPushButton("Snapshot blackboard")
+        self.btn_bb.setObjectName("secondary")
+        self.btn_bb.clicked.connect(self.snapshot_blackboard)
+        btns.addWidget(self.btn_send)
+        btns.addWidget(self.btn_stop)
+        btns.addWidget(self.btn_clear)
+        btns.addWidget(self.btn_bb)
+        btns.addStretch(1)
+        root.addLayout(btns)
+
+    def append_history(self, role: str, content: str) -> None:
+        content = (content or "").rstrip()
+        self._history.append({"role": role, "content": content})
+        self.transcript.appendPlainText("\n## " + role + "\n" + content + "\n")
+        self.transcript.moveCursor(QTextCursor.MoveOperation.End)
+
+    def clear_history(self) -> None:
+        if self._proc and self._proc.state() != QProcess.ProcessState.NotRunning:
+            QMessageBox.warning(self, "Busy", "Stop the current Hermes reply first.")
+            return
+        self._history.clear()
+        self.transcript.clear()
+        self.status.setText("idle")
+
+    def launch_classic_hermes(self) -> None:
+        """Launch classic Hermes Electron desktop (best-effort)."""
+        hermes = shutil.which("hermes") or str(Path.home() / ".local/bin/hermes")
+        if not Path(hermes).exists():
+            QMessageBox.warning(
+                self,
+                "Hermes",
+                "hermes CLI not found. Install Hermes Agent, then retry.",
+            )
+            return
+        env = _local_env()
+        # Prefer desktop; fall back to plain hermes TUI in terminal tab note
+        ok = QProcess.startDetached(
+            hermes,
+            ["desktop", "--cwd", str(_PROJECT_ROOT)],
+            str(_PROJECT_ROOT),
+        )
+        if not ok:
+            ok = QProcess.startDetached(hermes, [], str(_PROJECT_ROOT))
+        if ok:
+            self.transcript.appendPlainText(
+                "[gui] launched classic Hermes desktop (hermes desktop)\n"
+            )
+            self.status.setText("classic Hermes launched")
+        else:
+            QMessageBox.warning(self, "Hermes", "Failed to launch hermes desktop.")
+
+    def snapshot_blackboard(self) -> None:
+        if BlackboardClient is None:
+            self.transcript.appendPlainText("[blackboard] client unavailable\n")
+            return
+        try:
+            client = BlackboardClient()
+            snap = client.snapshot(role="hermes", limit_per_category=12)
+            self.transcript.appendPlainText(
+                "\n## blackboard snapshot (hermes read-only)\n"
+                + json.dumps(snap, indent=2)[:8000]
+                + "\n"
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.transcript.appendPlainText(f"[blackboard error] {exc}\n")
+
+    def send_message(self) -> None:
+        if self._proc and self._proc.state() != QProcess.ProcessState.NotRunning:
+            QMessageBox.warning(self, "Busy", "Hermes is still replying.")
+            return
+        prompt = self.input.toPlainText().strip()
+        if not prompt:
+            QMessageBox.information(self, "Prompt", "Enter a message for Hermes.")
+            return
+        self.append_history("you", prompt)
+        self.input.clear()
+        self.btn_send.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self.status.setText("hermes thinking…")
+
+        out_dir = _PROJECT_ROOT / "output"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        prompt_path = out_dir / "gui_hermes_prompt.txt"
+        # Include MODE for unified hermes brain
+        mode = self.mode.currentText().strip() or "MANAGER"
+        body = f"MODE: {mode}\n=== USER QUERY (ADMIN-PRIVILEGED) ===\n{prompt}\n=== END USER QUERY ===\n"
+        # retain short history as task context
+        history_bits = []
+        for item in self._history[:-1][-8:]:
+            history_bits.append(
+                str(item.get("role", "")).upper() + ": " + str(item.get("content", ""))[:500]
+            )
+        ctx_path = out_dir / "gui_hermes_task_context.txt"
+        if history_bits:
+            ctx_path.write_text(
+                "=== HERMES CONVERSATION CONTEXT ===\n" + "\n\n".join(history_bits) + "\n",
+                encoding="utf-8",
+            )
+        prompt_path.write_text(body, encoding="utf-8")
+
+        model = (self.model.currentText() or "hermes").strip()
+        args = [
+            "chat",
+            "-m",
+            model,
+            "-f",
+            str(prompt_path),
+            "--task-mode",
+            mode,
+            "-v",
+            "--max-tokens",
+            "2048",
+        ]
+        if history_bits:
+            args.extend(["--task-context-file", str(ctx_path)])
+
+        proc = QProcess(self)
+        proc.setWorkingDirectory(str(_PROJECT_ROOT))
+        proc.setProcessEnvironment(_local_env())
+        proc.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+        scout_bin = Path.home() / ".local" / "bin" / "scout"
+        if scout_bin.exists():
+            prog, prog_args = str(scout_bin), args
+        else:
+            prog, prog_args = _venv_python(), ["-m", "scout_crew.cli", *args]
+        proc.setProgram(prog)
+        proc.setArguments(prog_args)
+        self._stdout = []
+        self._stderr = []
+        proc.readyReadStandardOutput.connect(lambda: self._collect(proc, False))
+        proc.readyReadStandardError.connect(lambda: self._collect(proc, True))
+        proc.finished.connect(self._finished)
+        self._proc = proc
+        proc.start()
+        self.transcript.appendPlainText(
+            f"[gui-hermes] model={model} mode={mode} prompt_syntax=v1\n"
+        )
+
+    def _collect(self, proc: QProcess, err: bool) -> None:
+        if err:
+            data = bytes(proc.readAllStandardError()).decode("utf-8", errors="replace")
+            self._stderr.append(data)
+            for line in data.splitlines():
+                if line.strip():
+                    self.transcript.appendPlainText("[meta] " + line)
+        else:
+            data = bytes(proc.readAllStandardOutput()).decode("utf-8", errors="replace")
+            self._stdout.append(data)
+
+    def stop_message(self) -> None:
+        if self._proc and self._proc.state() != QProcess.ProcessState.NotRunning:
+            self._proc.kill()
+            self.transcript.appendPlainText("[hermes reply stopped]")
+
+    def _finished(self, code: int, _status) -> None:
+        self.btn_send.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        out = "".join(self._stdout).strip()
+        if not out:
+            out = f"(empty hermes response, exit={code})"
+        self.append_history("hermes", out)
+        self.status.setText(f"idle (exit={code})")
+        parent = self.parent()
+        # walk up to main window
+        w = self
+        while w is not None and not hasattr(w, "set_response_transcript"):
+            w = w.parent() if hasattr(w, "parent") else None
+        if w is not None and hasattr(w, "set_response_transcript"):
+            last_user = ""
+            for item in reversed(self._history):
+                if item.get("role") == "you":
+                    last_user = item.get("content") or ""
+                    break
+            w.set_response_transcript(last_user, out, source=f"hermes-tab exit={code}")
+
+
+class BlackboardMonitorPane(QWidget):
+    """Live view of blackboard server + category activity."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._server_proc: Optional[QProcess] = None
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+
+        header = QHBoxLayout()
+        title = QLabel("Blackboard processes")
+        title.setStyleSheet("font-weight: 700; color: #93c5fd;")
+        self.badge = QLabel("local/remote")
+        self.badge.setObjectName("badge")
+        header.addWidget(title)
+        header.addStretch(1)
+        header.addWidget(self.badge)
+        root.addLayout(header)
+
+        controls = QHBoxLayout()
+        self.btn_start = QPushButton("Start BB server :8765")
+        self.btn_start.clicked.connect(self.start_server)
+        self.btn_stop = QPushButton("Stop server")
+        self.btn_stop.setObjectName("danger")
+        self.btn_stop.setEnabled(False)
+        self.btn_stop.clicked.connect(self.stop_server)
+        self.btn_refresh = QPushButton("Refresh now")
+        self.btn_refresh.setObjectName("secondary")
+        self.btn_refresh.clicked.connect(self.refresh)
+        controls.addWidget(self.btn_start)
+        controls.addWidget(self.btn_stop)
+        controls.addWidget(self.btn_refresh)
+        controls.addStretch(1)
+        root.addLayout(controls)
+
+        self.view = QPlainTextEdit()
+        self.view.setReadOnly(True)
+        self.view.setFont(QFont("monospace", 10))
+        self.view.setPlaceholderText("Blackboard stats, pipeline + dev_debug snapshots…")
+        root.addWidget(self.view, 1)
+
+        self.server_log = ProcessConsole()
+        self.server_log.setMaximumHeight(160)
+        self.server_log.setPlaceholderText("Blackboard server process log…")
+        root.addWidget(QLabel("Server process log"))
+        root.addWidget(self.server_log)
+
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self.refresh)
+        self._timer.start(4000)
+        self.refresh()
+
+    def start_server(self) -> None:
+        if self._server_proc and self._server_proc.state() != QProcess.ProcessState.NotRunning:
+            return
+        proc = QProcess(self)
+        proc.setWorkingDirectory(str(_PROJECT_ROOT))
+        proc.setProcessEnvironment(_local_env())
+        proc.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+        self.server_log.clear()
+        self.server_log.attach(proc)
+        proc.setProgram(_venv_python())
+        proc.setArguments(
+            [
+                "-m",
+                "scout_crew.blackboard.server",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "8765",
+            ]
+        )
+        self._server_proc = proc
+        proc.start()
+        self.btn_start.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self.badge.setText("server starting…")
+        self.server_log.appendPlainText("$ python -m scout_crew.blackboard.server --host 0.0.0.0 --port 8765\n")
+
+    def stop_server(self) -> None:
+        if self._server_proc and self._server_proc.state() != QProcess.ProcessState.NotRunning:
+            self._server_proc.kill()
+            self.server_log.appendPlainText("\n[server killed]\n")
+        self.btn_start.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.badge.setText("server stopped")
+
+    def refresh(self) -> None:
+        if BlackboardClient is None:
+            self.view.setPlainText("blackboard module unavailable")
+            return
+        try:
+            client = BlackboardClient()
+            stats = client.stats()
+            # hermes-visible snapshot
+            try:
+                snap = client.snapshot(role="hermes", limit_per_category=8)
+            except Exception as exc:  # noqa: BLE001
+                snap = {"error": str(exc)}
+            mode = client.mode
+            running = bool(
+                self._server_proc
+                and self._server_proc.state() != QProcess.ProcessState.NotRunning
+            )
+            self.badge.setText(
+                f"{mode}" + (" · server up" if running else " · server off")
+            )
+            self.badge.setObjectName("badge" if mode else "badgeWarn")
+            self.badge.style().unpolish(self.badge)
+            self.badge.style().polish(self.badge)
+            payload = {
+                "mode": mode,
+                "server_process_running": running,
+                "stats": stats,
+                "snapshot_hermes_readonly": snap,
+            }
+            self.view.setPlainText(json.dumps(payload, indent=2))
+        except Exception as exc:  # noqa: BLE001
+            self.view.setPlainText(f"blackboard refresh error: {exc}")
+            self.badge.setText("error")
+            self.badge.setObjectName("badgeWarn")
+            self.badge.style().unpolish(self.badge)
+            self.badge.style().polish(self.badge)
+
+
+class PipelineMonitorPane(QWidget):
+    """Per-pipeline process / blackboard pipeline category view."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+
+        header = QHBoxLayout()
+        title = QLabel("Pipeline processes")
+        title.setStyleSheet("font-weight: 700; color: #86efac;")
+        self.badge = QLabel("pipeline")
+        self.badge.setObjectName("badge")
+        self.btn_refresh = QPushButton("Refresh")
+        self.btn_refresh.setObjectName("secondary")
+        self.btn_refresh.clicked.connect(self.refresh)
+        header.addWidget(title)
+        header.addStretch(1)
+        header.addWidget(self.badge)
+        header.addWidget(self.btn_refresh)
+        root.addLayout(header)
+
+        split = QSplitter(Qt.Orientation.Vertical)
+
+        self.board = QPlainTextEdit()
+        self.board.setReadOnly(True)
+        self.board.setFont(QFont("monospace", 10))
+        self.board.setPlaceholderText("pipeline category entries (specialist writers + manager summaries)…")
+        split.addWidget(self.board)
+
+        self.crew_tail = QPlainTextEdit()
+        self.crew_tail.setReadOnly(True)
+        self.crew_tail.setFont(QFont("monospace", 10))
+        self.crew_tail.setPlaceholderText("Recent crew / pipeline file artifacts…")
+        split.addWidget(self.crew_tail)
+        split.setStretchFactor(0, 2)
+        split.setStretchFactor(1, 1)
+        root.addWidget(split, 1)
+
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self.refresh)
+        self._timer.start(5000)
+        self.refresh()
+
+    def refresh(self) -> None:
+        lines = []
+        # blackboard pipeline
+        if BlackboardClient is not None:
+            try:
+                client = BlackboardClient()
+                entries = client.read(
+                    category="pipeline", role="manager", limit=20, active_only=True
+                )
+                lines.append("=== BLACKBOARD pipeline ===")
+                lines.append(client.format_entries(entries))
+                self.badge.setText(f"pipeline entries={len(entries)}")
+            except Exception as exc:  # noqa: BLE001
+                lines.append(f"[blackboard] {exc}")
+                self.badge.setText("pipeline error")
+        else:
+            lines.append("[blackboard unavailable]")
+        self.board.setPlainText("\n".join(lines))
+
+        # artifact tails
+        art = []
+        out = _PROJECT_ROOT / "output"
+        for name in (
+            "local_brief.json",
+            "dev_brief.md",
+            "az_manager_status.json",
+            "gui_inputs.json",
+        ):
+            p = out / name
+            if p.exists():
+                try:
+                    txt = p.read_text(encoding="utf-8", errors="replace")
+                    art.append(f"===== {name} =====\n{txt[:2500]}")
+                except OSError as exc:
+                    art.append(f"===== {name} =====\n(read error: {exc})")
+        # role roster
+        try:
+            art.insert(0, "=== model roster ===\n" + json.dumps(model_roster(), indent=2))
+        except Exception as exc:  # noqa: BLE001
+            art.insert(0, f"roster error: {exc}")
+        self.crew_tail.setPlainText("\n\n".join(art) if art else "(no pipeline artifacts yet)")
+
+
 class ScoutMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Scout Crew — Local CrewAI + Terminal")
-        self.resize(1280, 840)
+        self.setWindowTitle("Scout Crew — Hermes + CrewAI + Blackboard")
+        self.resize(1440, 920)
         icon_path = _PROJECT_ROOT / "assets" / "scout.png"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
@@ -526,6 +1023,7 @@ class ScoutMainWindow(QMainWindow):
         self._crew_proc: Optional[QProcess] = None
         self._chat_proc: Optional[QProcess] = None
         self._dev_window = None
+        self._hermes_classic_launched = False
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -614,9 +1112,9 @@ class ScoutMainWindow(QMainWindow):
         chat_box = QGroupBox("Admin / Core chat")
         chf = QFormLayout(chat_box)
         self.chat_model = QComboBox()
-        self.chat_model.addItems(["manager", "core"])
+        self.chat_model.addItems(["manager", "core", "hermes", "scout-hermes-hc1.0.0"])
         self.chat_model.setToolTip(
-            "Main chat is limited to admin (manager) and core. Use Dev Conversations for scout-dev."
+            "Main chat: manager/core/hermes. Dev Conversations = scout-dev. Hermes tab = Project Director + classic GUI."
         )
         self.chat_prompt = QTextEdit()
         self.chat_prompt.setFixedHeight(70)
@@ -644,14 +1142,21 @@ class ScoutMainWindow(QMainWindow):
         left_l.addWidget(chat_box)
         left_l.addStretch(1)
 
-        # Right: tabs console + terminal
+        # Right: tabs — Hermes first (selected at startup)
         right = QTabWidget()
+        self.hermes_pane = HermesConversationPane(self)
         self.crew_console = ProcessConsole()
         self.chat_console = ProcessConsole()
+        self.blackboard_pane = BlackboardMonitorPane(self)
+        self.pipeline_pane = PipelineMonitorPane(self)
         self.terminal = TerminalPane()
+        right.addTab(self.hermes_pane, "Hermes")
         right.addTab(self.crew_console, "Crew output")
         right.addTab(self.chat_console, "Chat output")
+        right.addTab(self.blackboard_pane, "Blackboard")
+        right.addTab(self.pipeline_pane, "Pipeline")
         right.addTab(self.terminal, "Terminal")
+        right.setCurrentIndex(0)  # Hermes open at startup
 
         splitter.addWidget(left)
         splitter.addWidget(right)
@@ -670,6 +1175,15 @@ class ScoutMainWindow(QMainWindow):
         act_status = QAction("Refresh status", self)
         act_status.triggered.connect(self.refresh_status)
         tools.addAction(act_status)
+        act_hermes = QAction("Launch classic Hermes GUI", self)
+        act_hermes.triggered.connect(self.hermes_pane.launch_classic_hermes)
+        tools.addAction(act_hermes)
+        act_bb = QAction("Start blackboard server", self)
+        act_bb.triggered.connect(self.blackboard_pane.start_server)
+        tools.addAction(act_bb)
+        act_dev = QAction("Open Dev Conversations", self)
+        act_dev.triggered.connect(self.open_dev_window)
+        tools.addAction(act_dev)
 
         self._status_timer = QTimer(self)
         self._status_timer.timeout.connect(self.refresh_status)
@@ -691,8 +1205,19 @@ class ScoutMainWindow(QMainWindow):
             # re-polish objectName style
             self.badge.style().unpolish(self.badge)
             self.badge.style().polish(self.badge)
+            # include hermes model presence
+            installed = st.get("installed_models") or []
+            has_hermes = any("hermes-hc" in str(x) for x in installed)
+            roster_line = roster.get("hermes") or roster.get("manager")
+            if has_hermes:
+                self.badge.setText(
+                    f"LOCAL · Ollama up · hermes={roster_line} · no cloud"
+                )
+            if hasattr(self, "pipeline_pane"):
+                # lightweight; timer also refreshes
+                pass
             self.statusBar().showMessage(
-                f"Ollama {st.get('ollama_host')} · base {st.get('openai_compatible_base')}",
+                f"Ollama {st.get('ollama_host')} · base {st.get('openai_compatible_base')} · hermes={roster_line}",
                 5000,
             )
         except Exception as exc:  # noqa: BLE001
@@ -791,6 +1316,10 @@ class ScoutMainWindow(QMainWindow):
         self.set_response_transcript(prompt, response, source=f"crew exit={code}")
         self.statusBar().showMessage(f"Crew finished ({code})", 8000)
         self.refresh_status()
+        if hasattr(self, "pipeline_pane"):
+            self.pipeline_pane.refresh()
+        if hasattr(self, "blackboard_pane"):
+            self.blackboard_pane.refresh()
 
     
     def open_dev_window(self) -> None:
@@ -962,6 +1491,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     app.setStyleSheet(DARK_QSS)
     win = ScoutMainWindow()
     win.show()
+    # Optionally auto-launch classic Hermes desktop once
+    if os.getenv("SCOUT_GUI_LAUNCH_HERMES_DESKTOP", "").lower() in {"1", "true", "yes"}:
+        QTimer.singleShot(800, win.hermes_pane.launch_classic_hermes)
     return app.exec()
 
 

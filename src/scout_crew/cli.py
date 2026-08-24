@@ -1,4 +1,18 @@
 #!/usr/bin/env python
+# Copyright 2026 Scout Project Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """scout — local CLI routing all LLM tokens through Ollama / CrewAI.
 
 No cloud provider calls. OpenAI-compatible traffic goes to
@@ -281,6 +295,45 @@ def cmd_env(_: argparse.Namespace) -> int:
     return 0
 
 
+
+
+def cmd_blackboard(args: argparse.Namespace) -> int:
+    """Inspect or write the multi-machine categorized blackboard."""
+    from scout_crew.blackboard.client import BlackboardClient
+    import json as _json
+    client = BlackboardClient()
+    if args.bb_action == "stats":
+        print(_json.dumps(client.stats(), indent=2))
+        return 0
+    if args.bb_action == "snapshot":
+        snap = client.snapshot(role=args.role or "operator", limit_per_category=args.limit)
+        print(_json.dumps(snap, indent=2))
+        return 0
+    if args.bb_action == "read":
+        entries = client.read(
+            category=args.category,
+            role=args.role or "operator",
+            limit=args.limit,
+            kind=args.kind or None,
+            query=args.query or None,
+            tag=args.tag or None,
+        )
+        print(client.format_entries(entries))
+        return 0
+    if args.bb_action == "write":
+        entry = client.write(
+            category=args.category,
+            role=args.role or "operator",
+            title=args.title or "(cli)",
+            body=args.body or "",
+            kind=args.kind or "raw",
+            tags=[t.strip() for t in (args.tags or "").split(",") if t.strip()],
+        )
+        print(_json.dumps(entry, indent=2))
+        return 0
+    print("unknown blackboard action", args.bb_action)
+    return 2
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="scout",
@@ -358,6 +411,26 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--keep-cwd", action="store_true", help="Do not chdir to project root")
     s.add_argument("-v", "--verbose", action="store_true")
     s.set_defaults(func=cmd_crew)
+
+    s = sub.add_parser(
+        "blackboard",
+        help="Multi-machine categorized blackboard shared memory",
+    )
+    s.add_argument(
+        "bb_action",
+        choices=["stats", "snapshot", "read", "write"],
+        help="Blackboard action",
+    )
+    s.add_argument("--category", default="pipeline", help="pipeline | dev_debug")
+    s.add_argument("--role", default="operator", help="Logical role for ACL")
+    s.add_argument("--limit", type=int, default=15)
+    s.add_argument("--kind", default="", help="raw|summary|rewrite")
+    s.add_argument("--query", default="")
+    s.add_argument("--tag", default="")
+    s.add_argument("--title", default="")
+    s.add_argument("--body", default="")
+    s.add_argument("--tags", default="", help="comma-separated tags")
+    s.set_defaults(func=cmd_blackboard)
 
     return p
 

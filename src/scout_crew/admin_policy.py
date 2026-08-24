@@ -1,3 +1,17 @@
+# Copyright 2026 Scout Project Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Admin roles and anti-recursion policy for the local Scout crew.
 
 CrewAI has no formal RBAC. "Admin" here means:
@@ -39,7 +53,7 @@ ANTI-RECURSION / NO QUERY-LOOP RULES (mandatory):
 1. Return one final answer that both serves the user query (if any) and completes the assigned task. Do not reopen finished specialist work.
 2. Never ask another agent to redo a task that already produced output in context.
 3. Never delegate to Local Scout Crew Manager or Scout Development admin peers.
-4. Do not call tools or delegate; answer the assigned task directly from context.
+4. Do not delegate and do not invent tool schemas. You MAY use blackboard_read / blackboard_write / blackboard_snapshot tools only. Answer the assigned task from context + blackboard.
 5. Do not emit self-referential instructions ("ask scout-dev again", "loop until", "re-run manager").
 6. If blocked by missing data, state the gap and stop — do not invent follow-up agent calls.
 7. Prefer facts already present in prior task context. Keep that context available through task completion; do not clear it after answering the user.
