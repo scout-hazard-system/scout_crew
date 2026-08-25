@@ -78,23 +78,24 @@ class ScoutCrew:
 
     @agent
     def alert_specialist(self) -> Agent:
-        return self._build_agent("alert_specialist", "alert", temperature=0.0, max_tokens=512)
+        # Qwen3 may emit internal reasoning before the contract line; keep headroom.
+        return self._build_agent("alert_specialist", "alert", temperature=0.0, max_tokens=1024)
 
     @agent
     def intel_specialist(self) -> Agent:
-        return self._build_agent("intel_specialist", "intel", temperature=0.0, max_tokens=1024)
+        return self._build_agent("intel_specialist", "intel", temperature=0.0, max_tokens=1536)
 
     @agent
     def vet_specialist(self) -> Agent:
-        return self._build_agent("vet_specialist", "vet", temperature=0.0, max_tokens=64)
+        return self._build_agent("vet_specialist", "vet", temperature=0.0, max_tokens=768)
 
     @agent
     def rank_specialist(self) -> Agent:
-        return self._build_agent("rank_specialist", "rank", temperature=0.0, max_tokens=1024)
+        return self._build_agent("rank_specialist", "rank", temperature=0.0, max_tokens=1536)
 
     @agent
     def core_specialist(self) -> Agent:
-        return self._build_agent("core_specialist", "core", temperature=0.1, max_tokens=1536)
+        return self._build_agent("core_specialist", "core", temperature=0.1, max_tokens=2048)
 
     @task
     def alert_task(self) -> Task:

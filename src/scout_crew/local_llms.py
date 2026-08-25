@@ -319,6 +319,20 @@ def status() -> dict:
     endpoints = role_endpoints()
     roster = {role: info["model"] for role, info in endpoints.items()}
 
+    leftover_llama = sorted(
+        {
+            m
+            for models in (h.get("models") or [] for h in host_status.values())
+            for m in models
+            if "llama" in str(m).lower()
+        }
+    )
+    role_uses_llama = {
+        role: model
+        for role, model in roster.items()
+        if "llama" in str(model).lower()
+    }
+
     return {
         "ollama_up": default_up,
         "ollama_host": OLLAMA_HOST,
@@ -329,6 +343,8 @@ def status() -> dict:
         "hosts": host_status,
         "role_endpoints": endpoints,
         "role_assignments": roster,
+        "role_uses_llama": role_uses_llama,
+        "leftover_llama_installs": leftover_llama,
         "error": default_err,
     }
 

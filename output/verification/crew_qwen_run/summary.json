@@ -1,0 +1,22 @@
+{
+  "crew_exit": 0,
+  "pass": true,
+  "weight_lineage_expected": "qwen3",
+  "roster_from_run": {
+    "manager": "scout-hermes-hc1.0.0",
+    "core": "scout-core1.0.5",
+    "dev": "scout-dev",
+    "vet": "scout-vet1.0.6",
+    "alert": "scout-alert",
+    "intel": "scout-intel",
+    "rank": "scout-rank",
+    "base": "qwen3:8b",
+    "hermes": "scout-hermes-hc1.0.0"
+  },
+  "llama_hits_in_log_count": 0,
+  "llama_hits_sample": [],
+  "llama_in_role_lines_sample": [],
+  "final_result_present": true,
+  "log_path": "/home/gibi/Desktop/scout_crew/output/verification/crew_qwen_run/crew_run.log",
+  "scan_path": "/home/gibi/Desktop/scout_crew/output/verification/crew_qwen_run/llama_scan.txt"
+}

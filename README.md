@@ -5,7 +5,8 @@
 Local-only [CrewAI](https://crewai.com) multi-agent system for on-device **scout** models served by [Ollama](https://ollama.com).
 
 **Design goals**
-- Zero cloud LLM token usage (OpenAI-compatible traffic forced to `127.0.0.1:11434`)
+- Zero cloud LLM token usage (loopback or private Tailscale Ollama peers only)
+- Default weights: **Qwen3** (`qwen3:8b` / `scout-*` / `scout-hermes-hc*`); Apache-2.0 source
 - Role-specialized scout models + admin manager / scout-dev
 - Sequential pipeline with anti-recursion guards
 - PROMPT SYNTAX v1 envelopes for every user prompt (CLI + GUI + crew)
@@ -55,16 +56,16 @@ curl -s http://127.0.0.1:11434/api/tags | head
 
 ### Recommended Ollama models
 
-| Role | Model tag |
-|------|-----------|
-| Manager (admin) | `qwen3:8b` |
-| Dev (admin) | `scout-dev` |
-| Core / nav / chat | `scout-core1.0.5` |
-| Alert | `scout-alert` |
-| Intel | `scout-intel` |
-| Vet | `scout-vet1.0.6` |
-| Rank | `scout-rank` |
-| Fallback | `qwen3:8b` |
+| Role | Model tag | Notes |
+|------|-----------|--------|
+| Manager (admin) | `scout-hermes-hc1.0.0` / `1.1.0` | Qwen3 high-context; may run on Windows mesh peer |
+| Dev (admin) | `scout-dev` | Qwen3 specialist |
+| Core / nav / chat | `scout-core1.0.5` | Qwen3 |
+| Alert | `scout-alert` | Qwen3 |
+| Intel | `scout-intel` | Qwen3 |
+| Vet | `scout-vet1.0.6` | Qwen3 |
+| Rank | `scout-rank` | Qwen3 |
+| Fallback | `qwen3:8b` | never Llama |
 
 Build / refresh from the sibling llm tree:
 
@@ -101,14 +102,17 @@ OLLAMA_BASE_URL=http://127.0.0.1:11434
 OPENAI_API_KEY=ollama
 OPENAI_API_BASE=http://127.0.0.1:11434/v1
 OPENAI_BASE_URL=http://127.0.0.1:11434/v1
-OLLAMA_MODEL_MANAGER=ollama/qwen3:8b
+OLLAMA_MODEL_MANAGER=ollama/scout-hermes-hc1.0.0
+OLLAMA_MODEL_HERMES=ollama/scout-hermes-hc1.0.0
 OLLAMA_MODEL_CORE=ollama/scout-core1.0.5
 OLLAMA_MODEL_VET=ollama/scout-vet1.0.6
 OLLAMA_MODEL_ALERT=ollama/scout-alert
 OLLAMA_MODEL_INTEL=ollama/scout-intel
 OLLAMA_MODEL_RANK=ollama/scout-rank
 OLLAMA_MODEL_DEV=ollama/scout-dev
+OLLAMA_MODEL_BASE=ollama/qwen3:8b
 CREWAI_TRACING_ENABLED=true
+# Optional mesh: SCOUT_PEER_OLLAMA_OPENAI=http://WINDOWS_TS_IP:11434/v1
 ```
 
 - Do **not** point `OPENAI_BASE_URL` at cloud hosts.
@@ -163,10 +167,10 @@ Run these in order after setup. All LLM calls must stay on `127.0.0.1:11434`.
 
 ```bash
 scout status
-# expect: "ollama_up": true, "external_token_usage": false
+# expect: ollama_up true, external_token_usage false, weight_lineage qwen3, role_uses_llama {}
 
 scout roster
-# expect role → model map (manager/qwen3:8b, dev/scout-dev, …)
+# expect role → model map (manager/hermes-hc, dev/scout-dev, …)
 
 scout models
 # expect scout-* and qwen3:8b tags
@@ -244,8 +248,13 @@ scout crew -v --inputs output/sample_verify/inputs.json
 | Pipeline | real `ALERT:…` (not template), `VET_PASS`/`VET_FAIL`, `nav_line` set |
 | Artifacts | `output/az_manager_status.json`, `output/dev_brief.md` written |
 
-Last committed integration snapshot:  
-`output/verification/crew_integration/validation.json` → **PASS** (~54s local run).
+Last committed integration snapshots:
+
+- `output/verification/crew_integration/validation.json` — earlier local integration
+- `output/verification/crew_qwen_run/summary.json` — **Qwen3 + mesh roster PASS** (`crew_exit: 0`, no Llama role use)
+- `output/verification/crew_qwen_run/llama_scan.txt` — log/brief Llama scan (clean)
+
+Full setup (mesh, licenses, rebuild): [SETUP.md](SETUP.md).
 
 ### Step E — GUI smoke (optional)
 
@@ -284,6 +293,7 @@ eval "$(scout env)"
 | `scout dev -p "…"` | admin shortcut → `scout-dev` |
 | `scout crew [-v] [--inputs file.json]` | full sequential crew |
 | `scout-gui` | desktop control plane + terminal |
+| `scout-mesh-status` | Tailscale + dual Ollama + role endpoints |
 | `crewai run` | CrewAI project entry (same crew) |
 
 ---
@@ -296,7 +306,7 @@ eval "$(scout env)"
 4. `rank_task` → scout-rank  
 5. `core_task` → scout-core  
 6. `dev_task` → scout-dev **(admin)**  
-7. `manager_synthesis_task` → qwen3:8b **(admin final brief)**  
+7. `manager_synthesis_task` → scout-hermes-hc **(admin final brief)**  
 
 User prompts are **admin-privileged**: answer first, retain task context, finish deliverable (no drop-through).
 

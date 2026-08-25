@@ -196,7 +196,7 @@ def test() -> None:
     try:
         ScoutCrew().crew().test(
             n_iterations=int(sys.argv[1]),
-            eval_llm=sys.argv[2] if len(sys.argv) > 2 else "ollama/llama3.1",
+eval_llm=sys.argv[2] if len(sys.argv) > 2 else "ollama/qwen3:8b",
             inputs=inputs,
         )
     except Exception as e:
