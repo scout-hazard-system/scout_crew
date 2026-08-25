@@ -1,0 +1,8 @@
+=== llama scan of crew log/outputs ===
+-- crew_run.log --
+(no llama hits in crew log)
+-- specialist_smoke.log --
+(no llama hits in smoke)
+-- output artifacts --
+(no llama hits in output briefs or missing)
+-- role config from status excerpt --
