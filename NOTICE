@@ -31,9 +31,12 @@ PySide6 / Qt for Python
 Ollama (runtime dependency; not redistributed as source in this repository)
   Copyright: Ollama contributors
   License: See https://github.com/ollama/ollama
-  Note: Model weights and third-party model licenses (for example, Llama and Qwen
-  community licenses) are separate from this repository's Apache-2.0 source license.
-  You must comply with each model provider's terms when you download or serve models.
+  Note: Model weights are separate from this repository's Apache-2.0 source
+  license. The default Scout inference lineage is Qwen3 (qwen3:8b and
+  scout-hermes-hc / specialist tags derived from it via Ollama Modelfiles).
+  You must comply with the applicable Qwen model terms when you download or
+  serve those weights. This project does not distribute Meta Llama weights
+  and does not include a Llama Community License.
 
 Python packaging and tooling (uv, and other build tools)
   Subject to their respective upstream licenses.

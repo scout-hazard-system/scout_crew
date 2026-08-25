@@ -36,14 +36,14 @@ curl -s http://127.0.0.1:11434/api/tags | head
 
 | Role | Ollama tag | Notes |
 |------|------------|--------|
-| Manager (admin) | `llama3.1` | synthesis + AZ alpha persona |
+| Manager (admin) | `qwen3:8b` | synthesis + AZ alpha persona |
 | Dev (admin) | `scout-dev` | process/debug; no manager approval |
 | Core | `scout-core1.0.5` | nav/chat package |
 | Alert | `scout-alert` | ALERT:/IGNORE |
 | Intel | `scout-intel` | dispatch structure |
 | Vet | `scout-vet1.0.6` | VET_PASS / VET_FAIL |
 | Rank | `scout-rank` | channel ranking |
-| Base fallback | `llama3.1` | generic |
+| Base fallback | `qwen3:8b` | generic |
 
 Build / refresh from the sibling llm tree (outside this repo):
 
@@ -51,7 +51,7 @@ Build / refresh from the sibling llm tree (outside this repo):
 ollama create scout-dev -f ~/Desktop/llm/dev/Modelfile.scout-dev
 # or full set:
 bash ~/Desktop/llm/build/build_llm_set.sh
-ollama list | egrep 'scout-|llama3.1'
+ollama list | egrep 'scout-|qwen3:8b'
 ```
 
 ---
@@ -79,7 +79,7 @@ OLLAMA_BASE_URL=http://127.0.0.1:11434
 OPENAI_API_KEY=ollama
 OPENAI_API_BASE=http://127.0.0.1:11434/v1
 OPENAI_BASE_URL=http://127.0.0.1:11434/v1
-OLLAMA_MODEL_MANAGER=ollama/llama3.1
+OLLAMA_MODEL_MANAGER=ollama/qwen3:8b
 OLLAMA_MODEL_CORE=ollama/scout-core1.0.5
 OLLAMA_MODEL_VET=ollama/scout-vet1.0.6
 OLLAMA_MODEL_ALERT=ollama/scout-alert

@@ -16,7 +16,7 @@ uv tool install crewai
 
 # Ollama must be running
 ollama serve   # if not already a service
-ollama list    # confirm scout-* and llama3.1
+ollama list    # confirm scout-* and qwen3:8b
 
 # Project
 cd ~/Desktop/scout_crew
@@ -87,7 +87,7 @@ One-shot completion through a role or raw Ollama model.
 ```bash
 scout chat -m dev -p "Your prompt"
 scout chat -m alert -p "Transcript: ..."
-scout chat -m llama3.1 -p "Hello"          # raw model name
+scout chat -m qwen3:8b -p "Hello"          # raw model name
 echo "piped prompt" | scout chat -m core
 scout chat -m dev -f ./notes.txt -p "Summarize the file"
 scout chat -m manager -p "..." -v          # verbose route metadata on stderr
@@ -105,7 +105,7 @@ Flags:
 | `--max-tokens` | `2048` | Cap |
 | `-v/--verbose` | off | Print route JSON on stderr |
 
-Role aliases: `dev`, `manager`/`mgr`/`admin`, `core`/`nav`/`chat`, `alert`, `intel`, `vet`, `rank`, `base`/`llama`/`llama3.1`.
+Role aliases: `dev`, `manager`/`mgr`/`admin`, `core`/`nav`/`chat`, `alert`, `intel`, `vet`, `rank`, `base`/`llama`/`qwen3:8b`.
 
 ### Prompt syntax v1
 

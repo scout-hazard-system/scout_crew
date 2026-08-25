@@ -31,3 +31,16 @@ echo -n "blackboard TS:    "; curl -sS --connect-timeout 2 "http://${ME}:8765/he
 echo
 echo -n "ssh win:22 "; timeout 2 bash -c "echo >/dev/tcp/${WIN}/22" 2>/dev/null && echo open || echo closed
 echo -n "ssh me:22  "; timeout 2 bash -c "echo >/dev/tcp/${ME}/22" 2>/dev/null && echo open || echo closed
+echo
+echo "== role endpoints (host-aware) =="
+if command -v uv >/dev/null 2>&1 && [[ -d "${SCOUT_CREW_ROOT:-$HOME/Desktop/scout_crew}" ]]; then
+  (
+    cd "${SCOUT_CREW_ROOT:-$HOME/Desktop/scout_crew}" || exit 0
+    # shellcheck disable=SC1091
+    [[ -f .env ]] && set -a && source .env && set +a
+    export SCOUT_PEER_OLLAMA_OPENAI="${SCOUT_PEER_OLLAMA_OPENAI:-http://${WIN}:11434/v1}"
+    uv run python -c 'from scout_crew.local_llms import status; import json; s=status(); print(json.dumps({"weight_lineage": s.get("weight_lineage"), "role_endpoints": s.get("role_endpoints"), "hosts": {k: {"up": v.get("up"), "n_models": len(v.get("models") or [])} for k,v in (s.get("hosts") or {}).items()}}, indent=2))' 2>/dev/null || echo "(role endpoint probe skipped)"
+  )
+else
+  echo "(uv/scout_crew not available for role probe)"
+fi

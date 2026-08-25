@@ -57,14 +57,14 @@ curl -s http://127.0.0.1:11434/api/tags | head
 
 | Role | Model tag |
 |------|-----------|
-| Manager (admin) | `llama3.1` |
+| Manager (admin) | `qwen3:8b` |
 | Dev (admin) | `scout-dev` |
 | Core / nav / chat | `scout-core1.0.5` |
 | Alert | `scout-alert` |
 | Intel | `scout-intel` |
 | Vet | `scout-vet1.0.6` |
 | Rank | `scout-rank` |
-| Fallback | `llama3.1` |
+| Fallback | `qwen3:8b` |
 
 Build / refresh from the sibling llm tree:
 
@@ -72,7 +72,7 @@ Build / refresh from the sibling llm tree:
 ollama create scout-dev -f ~/Desktop/llm/dev/Modelfile.scout-dev
 # or full set:
 bash ~/Desktop/llm/build/build_llm_set.sh
-ollama list | egrep 'scout-|llama3.1'
+ollama list | egrep 'scout-|qwen3:8b'
 ```
 
 ---
@@ -101,7 +101,7 @@ OLLAMA_BASE_URL=http://127.0.0.1:11434
 OPENAI_API_KEY=ollama
 OPENAI_API_BASE=http://127.0.0.1:11434/v1
 OPENAI_BASE_URL=http://127.0.0.1:11434/v1
-OLLAMA_MODEL_MANAGER=ollama/llama3.1
+OLLAMA_MODEL_MANAGER=ollama/qwen3:8b
 OLLAMA_MODEL_CORE=ollama/scout-core1.0.5
 OLLAMA_MODEL_VET=ollama/scout-vet1.0.6
 OLLAMA_MODEL_ALERT=ollama/scout-alert
@@ -166,10 +166,10 @@ scout status
 # expect: "ollama_up": true, "external_token_usage": false
 
 scout roster
-# expect role → model map (manager/llama3.1, dev/scout-dev, …)
+# expect role → model map (manager/qwen3:8b, dev/scout-dev, …)
 
 scout models
-# expect scout-* and llama3.1 tags
+# expect scout-* and qwen3:8b tags
 ```
 
 ### Step B — Single-model chat (prompt syntax v1)
@@ -233,7 +233,7 @@ scout crew -v --inputs output/sample_verify/inputs.json
 | Check | Expected |
 |-------|----------|
 | Exit code | `0` |
-| Local roster on stderr | includes `scout-dev`, `llama3.1`, other scout tags |
+| Local roster on stderr | includes `scout-dev`, `qwen3:8b`, other scout tags |
 | No cloud host | no `api.openai.com` in logs |
 | User prompt honored | e.g. `SAMPLE_CREW_OK` / `CREW_INTEGRATION_OK` in `user_response` |
 | Admin priority | `user_priority_applied: true`, `user_prompt_admin_privilege: true` |
@@ -296,7 +296,7 @@ eval "$(scout env)"
 4. `rank_task` → scout-rank  
 5. `core_task` → scout-core  
 6. `dev_task` → scout-dev **(admin)**  
-7. `manager_synthesis_task` → llama3.1 **(admin final brief)**  
+7. `manager_synthesis_task` → qwen3:8b **(admin final brief)**  
 
 User prompts are **admin-privileged**: answer first, retain task context, finish deliverable (no drop-through).
 
