@@ -330,7 +330,18 @@ def manager_status_payload(
         marker_files = apply_location_marker_filters(cfg)
     if catalog is None:
         catalog = apply_catalog_scope(cfg)
-    ready = all(Path(p).is_dir() for p in paths) and len(filters) > 0 and catalog.get("az_catalog_exists")
+    map_cache_az = Path.home() / ".scanner_stream" / "map_cache" / "shards" / "AZ"
+    map_cache_tiles = 0
+    if map_cache_az.is_dir():
+        map_cache_tiles = sum(1 for _ in map_cache_az.glob("*.mvt.gz"))
+    text_shard_dirs_ok = all(Path(p).is_dir() for p in paths)
+    ready = (
+        text_shard_dirs_ok
+        and len(filters) > 0
+        and bool(catalog.get("az_catalog_exists"))
+        and (map_cache_tiles > 0 or text_shard_dirs_ok)
+    )
+    # Prefer active when text markers/catalog ready even if planet prefetch is thin.
     status = "AZ_JURISDICTION_ACTIVE" if ready else "AZ_SHARD_MISSING"
     return {
         "phase": cfg.get("phase"),
@@ -347,6 +358,8 @@ def manager_status_payload(
         "location_marker_filters": filters,
         "filters_applied_count": len(filters),
         "az_shard_paths": paths,
+        "az_map_cache_shard": str(map_cache_az),
+        "az_map_cache_tiles": map_cache_tiles,
         "az_filter_files": marker_files,
         "az_shard_ready": ready,
         "catalog": catalog,
