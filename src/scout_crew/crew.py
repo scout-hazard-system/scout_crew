@@ -18,7 +18,7 @@ from crewai import Agent, Crew, Process, Task
 from crewai.agents.agent_builder.base_agent import BaseAgent
 from crewai.project import CrewBase, agent, crew, task
 
-from scout_crew.tools.blackboard_tool import tools_for_role
+from scout_crew.tools import tools_for_role
 from scout_crew.admin_policy import (
     ADMIN_AGENT_KEYS,
     ANTI_RECURSION_RULES,

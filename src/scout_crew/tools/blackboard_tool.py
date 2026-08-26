@@ -156,6 +156,54 @@ class BlackboardSnapshotTool(BaseTool):
             return json.dumps({"ok": False, "error": str(e)})
 
 
+class _IssueIn(BaseModel):
+    role: str = Field(..., description="Token role (alert, manager, intel, vet, rank, core, dev, operator)")
+    categories: str = Field(default="pipeline", description="Comma-separated categories (e.g. pipeline,dev_debug)")
+    device_id: str = Field(default="", description="Optional device-id claim recorded on the token")
+    ttl: int = Field(default=3600, description="Token lifetime in seconds (60-86400)")
+
+
+class _AuditIn(BaseModel):
+    limit: int = Field(default=100, description="Max recent audit events to return")
+
+
+class BlackboardIssueTokenTool(BaseTool):
+    name: str = "blackboard_issue_token"
+    description: str = (
+        "MANAGER-ONLY: mint a category-scoped blackboard token via the master "
+        "secret (SCOUT_BLACKBOARD_TOKEN_SECRET). Use to onboard a device/role "
+        "during moderated operations. Never issue widely."
+    )
+    args_schema: Type[BaseModel] = _IssueIn
+    role: str = "manager"
+
+    def _run(self, role: str, categories: str = "pipeline", device_id: str = "", ttl: int = 3600) -> str:
+        try:
+            cats = [c.strip() for c in (categories or "pipeline").split(",") if c.strip()]
+            result = _client().issue(role=role, categories=cats, device_id=device_id or None, ttl=int(ttl) or 3600)
+            return json.dumps({"ok": True, **result}, indent=2)
+        except Exception as e:  # noqa: BLE001
+            return json.dumps({"ok": False, "error": str(e)})
+
+
+class BlackboardAuditTool(BaseTool):
+    name: str = "blackboard_audit"
+    description: str = (
+        "MANAGER-ONLY: read the blackboard audit log (authorize/issue/write/deny "
+        "events + per-token volume). Use for moderation: spot flood behavior or "
+        "abnormal token volume. No rate cap is enforced — the manager watches here."
+    )
+    args_schema: Type[BaseModel] = _AuditIn
+    role: str = "manager"
+
+    def _run(self, limit: int = 100) -> str:
+        try:
+            result = _client().audit(limit=min(max(int(limit or 100), 1), 500))
+            return json.dumps(result, indent=2)
+        except Exception as e:  # noqa: BLE001
+            return json.dumps({"ok": False, "error": str(e)})
+
+
 def tools_for_role(role: str) -> list:
     """Return blackboard tool instances bound to a logical role."""
     r = (role or "operator").strip().lower()
@@ -170,6 +218,8 @@ def tools_for_role(role: str) -> list:
             BlackboardReadTool(role="manager"),
             BlackboardSnapshotTool(role="manager"),
             BlackboardWriteTool(role="manager"),
+            BlackboardIssueTokenTool(),
+            BlackboardAuditTool(),
         ]
     if r in {"dev", "dev_specialist", "scout-dev"}:
         return [

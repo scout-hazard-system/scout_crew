@@ -105,16 +105,44 @@ class Entry:
 
 
 class BlackboardStore:
-    """Thread-safe SQLite store (WAL) suitable for local multi-process + HTTP frontends."""
+    """Thread-safe store (SQLite WAL) suitable for local multi-process + HTTP frontends.
 
-    def __init__(self, db_path: Optional[Path] = None) -> None:
-        self.db_path = Path(db_path) if db_path else _default_db_path()
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+    memory=True runs an in-RAM store (journal_mode=MEMORY) for per-peer sandbox
+    contexts — e.g. a sandboxed blackboard whose context lives in the device RAM,
+    while the hub runs the same class file-backed.
+    """
+
+    def __init__(
+        self,
+        db_path: Optional[Path] = None,
+        *,
+        memory: bool = False,
+        sandbox_writers: Optional[Sequence[str]] = None,
+    ) -> None:
+        self.memory = bool(memory)
+        if self.memory:
+            self.db_path = Path(":memory:")
+            self._mem_conn = sqlite3.connect(":memory:", check_same_thread=False)
+            self._mem_conn.row_factory = sqlite3.Row
+        else:
+            self._mem_conn = None
+            self.db_path = Path(db_path) if db_path else _default_db_path()
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Sandbox pipeline policy: roles allowed to write pipeline kind=raw.
+        # None -> rely on ROLE_ACL (default full specialist writers).
+        self.sandbox_writers: Optional[set[str]] = (
+            {str(r).strip().lower() for r in sandbox_writers if str(r).strip()}
+            if sandbox_writers is not None
+            else None
+        )
         self._lock = threading.RLock()
         self._init_db()
 
     @contextmanager
     def _conn(self):
+        if self._mem_conn is not None:
+            yield self._mem_conn
+            return
         conn = sqlite3.connect(str(self.db_path), timeout=30, isolation_level=None)
         conn.row_factory = sqlite3.Row
         try:
@@ -125,8 +153,18 @@ class BlackboardStore:
         finally:
             conn.close()
 
+    def close(self) -> None:
+        if self._mem_conn is not None:
+            try:
+                self._mem_conn.close()
+            finally:
+                self._mem_conn = None
+
     def _init_db(self) -> None:
         with self._lock, self._conn() as conn:
+            if self._mem_conn is not None:
+                conn.execute("PRAGMA journal_mode=MEMORY")
+                conn.execute("PRAGMA synchronous=OFF")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS entries (
@@ -228,6 +266,18 @@ class BlackboardStore:
             self.check_perm(role_n, cat, "summarize")
         else:
             self.check_perm(role_n, cat, "write")
+        # Sandbox pipeline policy (SCOUT_BLACKBOARD_SANDBOX_WRITERS): when set,
+        # only the configured roles may write raw pipeline entries.
+        if (
+            self.sandbox_writers is not None
+            and cat == "pipeline"
+            and kind_n == KIND_RAW
+            and role_n not in self.sandbox_writers
+        ):
+            raise PermissionError(
+                f"role '{role_n}' is not in sandbox_writers for raw pipeline "
+                f"writes: {sorted(self.sandbox_writers)}"
+            )
 
         now = time.time()
         entry_id = uuid.uuid4().hex
@@ -343,6 +393,10 @@ class BlackboardStore:
         return {
             "db_path": str(self.db_path),
             "host": socket.gethostname(),
+            "mode": "memory" if self.memory else "file",
+            "sandbox_writers": (
+                sorted(self.sandbox_writers) if self.sandbox_writers is not None else None
+            ),
             "counts": [dict(r) for r in rows],
         }
 

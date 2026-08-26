@@ -2,12 +2,12 @@
 
 **License:** Apache License, Version 2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
 
-End-to-end setup for the **local / Tailscale-mesh** multi-agent Scout stack (CrewAI + Ollama).
+End-to-end setup for the **local / Scout Mesh** multi-agent Scout stack (CrewAI + Ollama).
 
 - **Source code:** Apache-2.0
 - **Default model weights:** **Qwen3** (`qwen3:8b` and derived `scout-*` tags). Comply with applicable Qwen terms when downloading or serving weights.
 - **Not in the default path:** Meta Llama weights / Llama Community License (this project does not ship them).
-- **No cloud LLM tokens:** OpenAI-compatible traffic stays on loopback or private Tailscale peers (`:11434`). `assert_local_only()` refuses public cloud provider keys and non-mesh base URLs.
+- **No cloud LLM tokens:** OpenAI-compatible traffic stays on loopback or private Scout Mesh (WireGuard `scoutwg0`, `10.66.0.0/16`) / LAN peers (`:11434`). `assert_local_only()` refuses public cloud provider keys and non-mesh base URLs.
 
 ---
 
@@ -16,12 +16,12 @@ End-to-end setup for the **local / Tailscale-mesh** multi-agent Scout stack (Cre
 | Tool | Why |
 |------|-----|
 | Linux desktop (Pop!_OS tested) | Specialists + optional crew host |
-| Optional Windows peer | Serve `scout-hermes-hc*` over Tailscale |
+| Optional peer host | Serve `scout-hermes-hc*` over Scout Mesh |
 | Python `>=3.10,<3.14` | CrewAI runtime |
 | [uv](https://docs.astral.sh/uv/) | deps + tool runner |
 | [Ollama](https://ollama.com) | local / mesh model server on `:11434` |
 | Git | clone / updates |
-| Tailscale (optional mesh) | multi-machine Hermes + blackboard |
+| WireGuard (optional mesh) | Scout Mesh overlay (`scoutwg0`); hub + peers |
 
 ```bash
 # uv
@@ -52,8 +52,8 @@ curl -s http://127.0.0.1:11434/api/tags | head
 
 | Role | Ollama tag | Typical host |
 |------|------------|--------------|
-| Manager (admin) | `scout-hermes-hc1.0.0` / `scout-hermes-hc1.1.0` | Windows peer **or** local |
-| Hermes (optional role) | same hermes-hc tags | Windows peer **or** local |
+| Manager (admin) | `scout-hermes-hc1.0.0` / `scout-hermes-hc1.1.0` | mesh peer (hermes-hc host) **or** local |
+| Hermes (optional role) | same hermes-hc tags | mesh peer (hermes-hc host) **or** local |
 | Dev (admin) | `scout-dev` | Linux specialists host |
 | Core | `scout-core1.0.5` | Linux |
 | Alert | `scout-alert` | Linux |
@@ -73,7 +73,7 @@ ollama pull qwen3:8b
 # Full specialist set (core, rank, vet, alert, intel, dev)
 bash ~/Desktop/llm/build/build_llm_set.sh
 
-# Hermes high-context (optional on this box; required on Windows if manager routes there)
+# Hermes high-context (optional on this box; required on the peer host if manager routes there)
 bash ~/Desktop/llm/unified/build_hermes_hc.sh
 
 ollama list | egrep 'scout-|qwen3:8b'
@@ -122,9 +122,15 @@ OLLAMA_MODEL_BASE=ollama/qwen3:8b
 CREWAI_TRACING_ENABLED=true
 ```
 
-### 3.2 `.env` — split mesh (Hermes on Windows, specialists on Linux)
+### 3.2 `.env` — split mesh (Hermes on a peer, specialists on Linux)
 
-Use when Windows Ollama serves hermes-hc and Linux serves the narrow specialists (verified pattern: Windows `100.82.130.47`, Linux `100.78.191.61`).
+Use when a peer host serves hermes-hc over **Scout Mesh (WireGuard `scoutwg0`,
+`10.66.0.0/16`)** and Linux serves the narrow specialists. The hub
+(`SCOUT_MESH_HUB_ADDRESS`, default **`10.66.2.3`**) hosts the map server
+(`:18080`) + file-backed blackboard (`:8765`). Peer Ollama is reached on its
+scoutwg0 mesh address only — LAN IPs are expected DOWN for peer roles. The
+Windows goose harness is an **off-mesh admin host** (no `scoutwg0` peer, no
+blackboard role); map data there flows via Pop!_OS peers over HTTPS.
 
 ```bash
 # Specialists / default host = this Linux machine
@@ -144,30 +150,44 @@ OLLAMA_MODEL_INTEL=ollama/scout-intel
 OLLAMA_MODEL_RANK=ollama/scout-rank
 OLLAMA_MODEL_BASE=ollama/qwen3:8b
 
-# Peer routing: manager + hermes resolve models on Windows
-SCOUT_PEER_WINDOWS_IP=100.82.130.47
-SCOUT_PEER_OLLAMA_OPENAI=http://100.82.130.47:11434/v1
-OLLAMA_HOST_HERMES=http://100.82.130.47:11434
-OLLAMA_HOST_MANAGER=http://100.82.130.47:11434
+# Scout Mesh (WireGuard scoutwg0) — hub hosts map server + blackboard
+# SCOUT_MESH_HUB_ADDRESS=10.66.2.3   # default hub (map :18080, blackboard :8765)
+# SCOUT_MESH_IFACE=scoutwg0
+# SCOUT_MESH_CIDR=10.66.0.0/16
+
+# Peer routing: manager + hermes resolve models on the peer's scoutwg0 mesh IP
+# SCOUT_PEER_MESH_IP=10.66.2.4
+SCOUT_PEER_OLLAMA_OPENAI=http://10.66.2.4:11434/v1
+OLLAMA_HOST_HERMES=http://10.66.2.4:11434
+OLLAMA_HOST_MANAGER=http://10.66.2.4:11434
 # Optional explicit specialist hosts (default = OLLAMA_BASE_URL)
 # OLLAMA_HOST_CORE=http://127.0.0.1:11434
 # OLLAMA_HOST_ALERT=http://127.0.0.1:11434
 
-# Blackboard hub (usually Linux)
-# SCOUT_BLACKBOARD_URL=http://100.78.191.61:8765
+# Blackboard hub (map/blackboard server, usually the mesh hub)
+# SCOUT_BLACKBOARD_URL=http://10.66.2.3:8765
+# SCOUT_BLACKBOARD_TOKEN=<role-scoped token>   # when token auth is enabled
 ```
 
 Per-role host env vars: `OLLAMA_HOST_MANAGER`, `OLLAMA_HOST_HERMES`, `OLLAMA_HOST_CORE`, `OLLAMA_HOST_DEV`, `OLLAMA_HOST_ALERT`, `OLLAMA_HOST_INTEL`, `OLLAMA_HOST_VET`, `OLLAMA_HOST_RANK`, `OLLAMA_HOST_BASE`.
 
-Windows peer must:
+Peer host must:
 
-1. Run Ollama reachable on Tailscale (`0.0.0.0:11434` or firewall allow).
-2. Have `qwen3:8b` and `scout-hermes-hc*` installed.
-3. Optionally drop unused `llama3.1` for a clean inventory.
+1. Run Ollama reachable on its **Scout Mesh IP** (`10.66.2.4:11434`). This deployment locks peer Ollama to the scoutwg0 mesh IP set — LAN IPs time out / should be firewalled.
+2. Set `OLLAMA_HOST=0.0.0.0:11434` on the peer so the WireGuard interface can accept connections; firewall still blocks non-mesh sources.
+3. Have `qwen3:8b` and `scout-hermes-hc*` installed.
+4. Optionally drop unused `llama3.1` for a clean inventory.
 
 ```bash
 scout-mesh-status
-# expect: ollama TS win up; role endpoints show hermes/manager → Windows, specialists → Linux
+# expect:
+#   mesh_provider=wireguard / iface=scoutwg0 / mesh_cidr=10.66.0.0/16
+#   peer_ollama_lock=mesh_only
+#   ollama mesh peer UP on 10.66.2.4
+#   LAN peer DOWN (expected)
+#   blackboard hub UP on 10.66.2.3:8765 / map server UP on 10.66.2.3:18080
+#   role endpoints: hermes/manager → peer mesh IP, specialists → Linux
+# off-mesh harness: peer_mesh_ip=unset is fine (NOTE, not FAIL)
 ```
 
 Never commit `.env` (gitignored). Start from `.env.example`.
@@ -216,7 +236,7 @@ scout status
 
 scout roster
 scout models
-scout-mesh-status   # if using Tailscale split
+scout-mesh-status   # if using Scout Mesh split
 ```
 
 ### 5.2 Single-model paths
@@ -279,7 +299,7 @@ Tabs include Hermes, Crew, Chat, Blackboard, Pipeline, Terminal. Badge should sh
 
 | Symptom | Fix |
 |---------|-----|
-| `Ollama is unreachable` | start `ollama serve`; mesh: bind `0.0.0.0`, check Tailscale + firewall |
+| `Ollama is unreachable` | start `ollama serve`; mesh: bind `0.0.0.0`, check WireGuard scoutwg0 + firewall |
 | Empty LLM / vet fails | rebuild specialists after Modelfile token bump; ensure crew `max_tokens` headroom for Qwen3 |
 | Manager on wrong host | set `OLLAMA_HOST_MANAGER` / `SCOUT_PEER_OLLAMA_OPENAI` |
 | `role_uses_llama` non-empty | fix `.env` pins; remove Llama from `OLLAMA_MODEL_*` |
@@ -297,6 +317,9 @@ Tabs include Hermes, Crew, Chat, Blackboard, Pipeline, Terminal. Badge should sh
 - [NOTICE](NOTICE) / [LICENSES/README.md](LICENSES/README.md) — Apache-2.0 vs Qwen weights
 - `~/Desktop/llm/NOTICE` — Modelfile tree license notes
 - `output/verification/` — smoke/integration summaries
+- `~/Desktop/docs/guides/SCOUT_MESH.md` — Scout Mesh (WireGuard) deploy runbook
+- `~/Desktop/docs/guides/DYNAMIC_MESH_IP_BINDING.md` — dynamic mesh IP/endpoint binding
+- `~/Desktop/docs/guides/FINAL_DEPLOYMENT_CONFIG.md` — verified ports/URLs
 
 ---
 
@@ -305,4 +328,4 @@ Tabs include Hermes, Crew, Chat, Blackboard, Pipeline, Terminal. Badge should sh
 - Never commit `.env`.
 - Trace links can expose prompts/tool I/O — treat as sensitive.
 - Dummy `OPENAI_API_KEY=ollama` is intentional for local OpenAI-compatible clients.
-- Tailscale peers are allowed; public cloud LLM endpoints are not.
+- Scout Mesh (WireGuard) peers are allowed; public cloud LLM endpoints are not.

@@ -12,6 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from scout_crew.tools.blackboard_tool import tools_for_role
+"""Role-scoped tool composition: blackboard + read-only map tools."""
+
+from scout_crew.tools.blackboard_tool import tools_for_role as _blackboard_tools_for_role
+from scout_crew.tools.map_tool import map_tools_for_role
+
+
+def tools_for_role(role: str) -> list:
+    """Blackboard tools (role ACL) + read-only map tools for every role."""
+    return _blackboard_tools_for_role(role) + map_tools_for_role(role)
+
 
 __all__ = ["tools_for_role"]

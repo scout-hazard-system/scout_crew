@@ -15,8 +15,8 @@
 """Local/mesh LLM wiring for CrewAI via Ollama.
 
 Default: all roles hit OLLAMA_BASE_URL (this machine).
-Optional split routing (Tailscale mesh):
-  OLLAMA_HOST_HERMES / OLLAMA_HOST_MANAGER  -> Windows (scout-hermes-hc)
+Optional split routing (Scout Mesh WireGuard, scoutwg0 / 10.66.0.0/16):
+  OLLAMA_HOST_HERMES / OLLAMA_HOST_MANAGER  -> peer host (scoutwg0 mesh IP)
   OLLAMA_HOST_ALERT / INTEL / VET / RANK / CORE / DEV -> Linux specialists
 
 No cloud provider keys or external token usage.
@@ -301,6 +301,60 @@ def role_endpoints() -> Dict[str, Dict[str, str]]:
     return roster
 
 
+def mesh_ip_set() -> Dict[str, str]:
+    """Canonical Scout Mesh (WireGuard) endpoints for this deployment.
+
+    scoutwg0 (10.66.0.0/16) carries the mesh. The hub hosts the map server
+    (:18080) and the file-backed blackboard (:8765). Peer Ollama is reached on
+    its scoutwg0 mesh address — LAN IPs are expected DOWN for the peer roles.
+    All values are env-driven so the real hub/peer addresses live in .env.
+    """
+    hub = (os.getenv("SCOUT_MESH_HUB_ADDRESS") or "").strip() or "10.66.2.3"
+    peer_mesh_ip = (os.getenv("SCOUT_PEER_MESH_IP") or "").strip()
+    iface = (os.getenv("SCOUT_MESH_IFACE") or "scoutwg0").strip()
+    cidr = (os.getenv("SCOUT_MESH_CIDR") or "10.66.0.0/16").strip()
+    return {
+        "mesh_provider": "wireguard",
+        "iface": iface,
+        "mesh_cidr": cidr,
+        "hub_address": hub,
+        "peer_mesh_ip": peer_mesh_ip or "(unset)",
+        "peer_ollama_lock": "mesh_only",
+        "peer_ollama_url": f"http://{peer_mesh_ip}:11434" if peer_mesh_ip else "",
+        "self_ollama_url": OLLAMA_HOST,
+        "blackboard_url": (
+            os.getenv("SCOUT_BLACKBOARD_URL") or ""
+        ).strip() or f"http://{hub}:8765",
+        "map_server_url": (
+            os.getenv("SCOUT_MAP_BASE_URL") or ""
+        ).strip() or f"http://{hub}:18080",
+        "note": (
+            "Scout Mesh = WireGuard scoutwg0 (10.66.0.0/16). Hub "
+            f"{hub} hosts map server (:18080) + blackboard (:8765). "
+            "Peer Ollama answers on scoutwg0 only — do not use the peer "
+            "LAN IP for mesh LLM calls."
+        ),
+    }
+
+
+def probe_url(url: str, timeout: float = 2.0) -> Dict[str, object]:
+    """Lightweight GET probe used by mesh status tooling."""
+    url = (url or "").strip()
+    if not url:
+        return {"url": url, "up": False, "error": "empty url"}
+    try:
+        response = requests.get(url, timeout=timeout)
+        return {
+            "url": url,
+            "up": response.ok,
+            "status_code": response.status_code,
+            "body_preview": (response.text or "")[:120],
+            "error": None if response.ok else f"HTTP {response.status_code}",
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"url": url, "up": False, "status_code": None, "body_preview": "", "error": str(exc)}
+
+
 def status() -> dict:
     """Diagnostics for local/mesh manager / model availability."""
     hosts_needed = {resolve_role_host(r) for r in ROLE_MODEL_PREFS}
@@ -333,6 +387,20 @@ def status() -> dict:
         if "llama" in str(model).lower()
     }
 
+    mesh = mesh_ip_set()
+    peer_ip = mesh.get("peer_mesh_ip") or ""
+    peer_mesh_probe = (
+        probe_url(f"http://{peer_ip}:11434/api/version")
+        if peer_ip and peer_ip != "(unset)"
+        else {"up": False, "error": "SCOUT_PEER_MESH_IP unset (off-mesh harness tier)"}
+    )
+    hub = mesh.get("hub_address") or ""
+    hub_blackboard_probe = (
+        probe_url(f"http://{hub}:8765/health")
+        if hub
+        else {"up": False, "error": "SCOUT_MESH_HUB_ADDRESS unset"}
+    )
+
     return {
         "ollama_up": default_up,
         "ollama_host": OLLAMA_HOST,
@@ -345,6 +413,9 @@ def status() -> dict:
         "role_assignments": roster,
         "role_uses_llama": role_uses_llama,
         "leftover_llama_installs": leftover_llama,
+        "mesh_ip_set": mesh,
+        "peer_mesh_ollama": peer_mesh_probe,
+        "hub_blackboard": hub_blackboard_probe,
         "error": default_err,
     }
 
@@ -352,7 +423,7 @@ def status() -> dict:
 def assert_local_only() -> None:
     """Fail fast if env looks configured for a cloud LLM provider.
 
-    Tailscale / LAN Ollama peers (private IPs, :11434) are allowed.
+    Scout Mesh (WireGuard) / LAN Ollama peers (private IPs, :11434) are allowed.
     """
     blocked_keys = [
         "ANTHROPIC_API_KEY",

@@ -12,18 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Blackboard client: local SQLite or remote HTTP multi-machine backend."""
+"""Blackboard client: local SQLite or remote HTTP multi-machine backend.
+
+When SCOUT_BLACKBOARD_TOKEN is set, remote requests carry a category-scoped
+bearer token minted via POST /v1/keys/authorize (device) or /v1/keys/issue
+(manager/CLI). Local mode mints local-only tokens against the configured secret.
+"""
 
 from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from scout_crew.blackboard import auth
 from scout_crew.blackboard.store import BlackboardStore, Entry
 
 
@@ -34,25 +41,32 @@ class BlackboardClient:
         base_url: Optional[str] = None,
         db_path: Optional[Path] = None,
         timeout: float = 15.0,
+        memory: bool = False,
+        token: Optional[str] = None,
     ) -> None:
         self.base_url = (base_url or os.getenv("SCOUT_BLACKBOARD_URL", "")).rstrip("/")
         self.timeout = timeout
+        self.token = token or os.getenv("SCOUT_BLACKBOARD_TOKEN", "") or ""
         self._local: Optional[BlackboardStore] = None
         if not self.base_url:
-            self._local = BlackboardStore(db_path=db_path)
+            self._local = BlackboardStore(db_path=db_path, memory=memory)
 
     @property
     def mode(self) -> str:
         return "remote" if self.base_url else "local"
 
-    def _http(self, method: str, path: str, payload: Optional[dict] = None) -> Any:
+    def _http(self, method: str, path: str, payload: Optional[dict] = None, *, headers: Optional[Dict[str, str]] = None) -> Any:
         url = f"{self.base_url}{path}"
         data = None
-        headers = {"Accept": "application/json"}
+        req_headers = {"Accept": "application/json"}
+        if self.token:
+            req_headers["Authorization"] = f"Bearer {self.token}"
+        if headers:
+            req_headers.update(headers)
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
-            headers["Content-Type"] = "application/json"
-        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+            req_headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, headers=req_headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 body = resp.read().decode("utf-8")
@@ -82,6 +96,88 @@ class BlackboardClient:
         if self._local:
             return self._local.stats()
         return self._http("GET", "/v1/stats")
+
+    # ---- key authorization -------------------------------------------------
+
+    def authorize(
+        self,
+        *,
+        device_id: str = "",
+        entry_token: str = "",
+        captcha_token: str = "",
+        role: str = "",
+        categories: Optional[Sequence[str]] = None,
+        ttl: int = 3600,
+        admin_secret: str = "",
+    ) -> Dict[str, Any]:
+        """Mint a role-scoped device token. Remote: POST /v1/keys/authorize.
+        Local: mint against the configured secret with an audit entry."""
+        secret = admin_secret or os.getenv("SCOUT_BLACKBOARD_TOKEN_SECRET", "") or ""
+        proof = {}
+        if entry_token:
+            proof["entry_token"] = entry_token
+        if captcha_token:
+            proof["captcha_token"] = captcha_token
+        if self._local:
+            if not secret:
+                raise RuntimeError("SCOUT_BLACKBOARD_TOKEN_SECRET unset; cannot mint local token")
+            token = auth.mint_token(
+                secret, role=role or "alert",
+                categories=list(categories or ["pipeline"]),
+                device_id=device_id or "local", ttl=ttl,
+            )
+            return {"ok": True, "token": token, "claims": auth.parse_token(token), "expires_in": ttl, "mode": "local"}
+        return self._http("POST", "/v1/keys/authorize", {
+            "device_id": device_id,
+            "proof": proof,
+            "role": role,
+            "categories": list(categories or ["pipeline"]),
+            "ttl": ttl,
+        })
+
+    def issue(
+        self,
+        *,
+        role: str,
+        categories: Sequence[str],
+        device_id: str = "",
+        ttl: int = 3600,
+        admin_secret: str = "",
+    ) -> Dict[str, Any]:
+        """Master-secret token mint for manager/CLI (moderation path)."""
+        secret = admin_secret or os.getenv("SCOUT_BLACKBOARD_TOKEN_SECRET", "") or ""
+        if self._local:
+            if not secret:
+                raise RuntimeError("SCOUT_BLACKBOARD_TOKEN_SECRET unset; cannot mint local token")
+            token = auth.mint_token(
+                secret, role=role, categories=list(categories),
+                device_id=device_id, ttl=ttl,
+            )
+            return {"ok": True, "token": token, "claims": auth.parse_token(token), "expires_in": ttl, "mode": "local"}
+        return self._http("POST", "/v1/keys/issue", {
+            "role": role,
+            "categories": list(categories),
+            "device_id": device_id,
+            "ttl": ttl,
+        }, headers={"X-Scout-Admin": secret})
+
+    def revoke(self, jti: str, *, admin_secret: str = "") -> Dict[str, Any]:
+        secret = admin_secret or os.getenv("SCOUT_BLACKBOARD_TOKEN_SECRET", "") or ""
+        if self._local:
+            if not secret:
+                raise RuntimeError("SCOUT_BLACKBOARD_TOKEN_SECRET unset")
+            return {"ok": True, "revoked_jti": jti, "mode": "local"}
+        return self._http("POST", "/v1/keys/revoke", {"jti": jti}, headers={"X-Scout-Admin": secret})
+
+    def audit(self, *, limit: int = 200, admin_secret: str = "") -> Dict[str, Any]:
+        """Manager-moderated audit log + per-token volume (flood watch)."""
+        if self._local:
+            secret = admin_secret or os.getenv("SCOUT_BLACKBOARD_TOKEN_SECRET", "") or ""
+            if not secret:
+                raise RuntimeError("SCOUT_BLACKBOARD_TOKEN_SECRET unset")
+            return {"events": [], "volume": {}, "mode": "local",
+                    "note": "local store has no audit trail; run the HTTP server for moderation"}
+        return self._http("GET", f"/v1/audit?limit={int(limit)}")
 
     def format_entries(self, entries: List[Dict[str, Any]], *, max_body: int = 800) -> str:
         if not entries:
