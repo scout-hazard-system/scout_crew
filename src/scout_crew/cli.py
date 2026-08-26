@@ -50,7 +50,9 @@ from scout_crew.arizona_phase import (  # noqa: E402
 from scout_crew.local_llms import (  # noqa: E402
     assert_local_only,
     make_llm,
+    mesh_ip_set,
     model_roster,
+    resolve_role_host,
     resolve_role_model,
     status,
 )
@@ -146,24 +148,27 @@ def cmd_chat(args: argparse.Namespace) -> int:
     if role == "custom":
         from crewai import LLM
 
+        route_base = os.environ["OPENAI_BASE_URL"]
         llm = LLM(
             model=f"ollama/{model}" if "/" not in model else model,
-            base_url=os.environ["OPENAI_BASE_URL"],
+            base_url=route_base,
             api_key=os.environ["OPENAI_API_KEY"],
             temperature=args.temperature,
             max_tokens=args.max_tokens,
         )
     else:
         llm = make_llm(role, temperature=args.temperature, max_tokens=args.max_tokens)
+        route_base = f"{resolve_role_host(role).rstrip('/')}/v1"
 
     if args.verbose:
         print(
             json.dumps(
                 {
-                    "route": "local-ollama",
+                    "route": "mesh-ollama" if role in {"manager", "hermes"} else "local-ollama",
                     "role": role,
                     "model": getattr(llm, "model", model),
-                    "base_url": os.environ["OPENAI_BASE_URL"],
+                    "base_url": route_base,
+                    "mesh_ip_set": mesh_ip_set(),
                     "external_token_usage": False,
                     "prompt_syntax": "v1",
                     "envelope": True,
@@ -262,6 +267,7 @@ def cmd_crew(args: argparse.Namespace) -> int:
         json.dumps(az_status, indent=2) + "\n", encoding="utf-8"
     )
     if args.verbose:
+        print("Mesh IP set:", json.dumps(mesh_ip_set(), indent=2), file=sys.stderr)
         print("Local model roster:", json.dumps(model_roster(), indent=2), file=sys.stderr)
 
     result = ScoutCrew().crew().kickoff(inputs=inputs)

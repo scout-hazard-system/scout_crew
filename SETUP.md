@@ -161,13 +161,18 @@ Per-role host env vars: `OLLAMA_HOST_MANAGER`, `OLLAMA_HOST_HERMES`, `OLLAMA_HOS
 
 Windows peer must:
 
-1. Run Ollama reachable on Tailscale (`0.0.0.0:11434` or firewall allow).
-2. Have `qwen3:8b` and `scout-hermes-hc*` installed.
-3. Optionally drop unused `llama3.1` for a clean inventory.
+1. Run Ollama reachable on its **Tailscale IP** (`100.82.130.47:11434`). This deployment locks peer Ollama to the Tailscale IP set — LAN IPs time out.
+2. Set `OLLAMA_HOST=0.0.0.0:11434` on Windows so the Tailscale interface can accept connections; firewall may still block non-Tailscale sources.
+3. Have `qwen3:8b` and `scout-hermes-hc*` installed.
+4. Optionally drop unused `llama3.1` for a clean inventory.
 
 ```bash
 scout-mesh-status
-# expect: ollama TS win up; role endpoints show hermes/manager → Windows, specialists → Linux
+# expect:
+#   peer_ollama_lock=tailscale_only
+#   ollama TS win UP on 100.82.130.47
+#   ollama LAN win DOWN (expected)
+#   role endpoints: hermes/manager → Windows TS, specialists → Linux
 ```
 
 Never commit `.env` (gitignored). Start from `.env.example`.
@@ -297,6 +302,8 @@ Tabs include Hermes, Crew, Chat, Blackboard, Pipeline, Terminal. Badge should sh
 - [NOTICE](NOTICE) / [LICENSES/README.md](LICENSES/README.md) — Apache-2.0 vs Qwen weights
 - `~/Desktop/llm/NOTICE` — Modelfile tree license notes
 - `output/verification/` — smoke/integration summaries
+- `~/Desktop/docs/guides/PEER_MESH_DEPLOYMENT.md` — team Tailscale mesh deploy runbook
+- `~/Desktop/docs/guides/FINAL_DEPLOYMENT_CONFIG.md` — verified ports/URLs
 
 ---
 

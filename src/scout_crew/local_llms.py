@@ -301,6 +301,46 @@ def role_endpoints() -> Dict[str, Dict[str, str]]:
     return roster
 
 
+def mesh_ip_set() -> Dict[str, str]:
+    """Canonical Tailscale mesh IPs for this Scout deployment.
+
+    Windows peer Ollama is locked to the Tailscale CGNAT address (not LAN).
+    Clients must use SCOUT_PEER_WINDOWS_IP / 100.x URLs — LAN IPs time out.
+    """
+    self_ip = (os.getenv("SCOUT_TAILSCALE_IP") or "").strip()
+    peer_ip = (os.getenv("SCOUT_PEER_WINDOWS_IP") or "").strip()
+    return {
+        "self_tailscale_ip": self_ip or "(unset)",
+        "peer_windows_tailscale_ip": peer_ip or "(unset)",
+        "peer_ollama_lock": "tailscale_only",
+        "peer_ollama_url": f"http://{peer_ip}:11434" if peer_ip else "",
+        "self_ollama_url": f"http://{self_ip}:11434" if self_ip else OLLAMA_HOST,
+        "blackboard_url": (os.getenv("SCOUT_BLACKBOARD_URL") or "").strip(),
+        "note": (
+            "Windows Ollama answers on Tailscale 100.x only; "
+            "do not use the peer LAN IP for mesh LLM calls."
+        ),
+    }
+
+
+def probe_url(url: str, timeout: float = 2.0) -> Dict[str, object]:
+    """Lightweight GET probe used by mesh status tooling."""
+    url = (url or "").strip()
+    if not url:
+        return {"url": url, "up": False, "error": "empty url"}
+    try:
+        response = requests.get(url, timeout=timeout)
+        return {
+            "url": url,
+            "up": response.ok,
+            "status_code": response.status_code,
+            "body_preview": (response.text or "")[:120],
+            "error": None if response.ok else f"HTTP {response.status_code}",
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"url": url, "up": False, "status_code": None, "body_preview": "", "error": str(exc)}
+
+
 def status() -> dict:
     """Diagnostics for local/mesh manager / model availability."""
     hosts_needed = {resolve_role_host(r) for r in ROLE_MODEL_PREFS}
@@ -333,6 +373,14 @@ def status() -> dict:
         if "llama" in str(model).lower()
     }
 
+    mesh = mesh_ip_set()
+    peer_ip = mesh.get("peer_windows_tailscale_ip") or ""
+    peer_ts_probe = (
+        probe_url(f"http://{peer_ip}:11434/api/version")
+        if peer_ip and peer_ip != "(unset)"
+        else {"up": False, "error": "SCOUT_PEER_WINDOWS_IP unset"}
+    )
+
     return {
         "ollama_up": default_up,
         "ollama_host": OLLAMA_HOST,
@@ -345,6 +393,8 @@ def status() -> dict:
         "role_assignments": roster,
         "role_uses_llama": role_uses_llama,
         "leftover_llama_installs": leftover_llama,
+        "mesh_ip_set": mesh,
+        "peer_tailscale_ollama": peer_ts_probe,
         "error": default_err,
     }
 

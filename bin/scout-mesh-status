@@ -14,33 +14,109 @@
 # limitations under the License.
 
 # Quick mesh health: Tailscale + Ollama + blackboard + peer probes
+# Windows peer Ollama is locked to the Tailscale IP set (100.x), not LAN.
 set -u
+ROOT="${SCOUT_CREW_ROOT:-$HOME/Desktop/scout_crew}"
+if [[ -f "$ROOT/.env" ]]; then
+  # shellcheck disable=SC1091
+  set -a && source "$ROOT/.env" && set +a
+fi
+
 ME="${SCOUT_TAILSCALE_IP:-$(tailscale ip -4 2>/dev/null | head -1)}"
 WIN="${SCOUT_PEER_WINDOWS_IP:-100.82.130.47}"
-echo "me=$ME win=$WIN"
-echo -n "tailscale: "; tailscale status --json 2>/dev/null | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d.get("BackendState"), d.get("Self",{}).get("Online"))' 2>/dev/null || tailscale status | head -3
-echo -n "ollama local: "; curl -sS --connect-timeout 2 http://127.0.0.1:11434/api/version || echo DOWN
+# Optional LAN guess from Tailscale direct endpoint — Ollama is expected DOWN here.
+WIN_LAN="${SCOUT_PEER_WINDOWS_LAN_IP:-}"
+if [[ -z "$WIN_LAN" ]]; then
+  WIN_LAN="$(
+    tailscale status --json 2>/dev/null | ME_WIN="$WIN" python3 -c '
+import json, os, re, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(0)
+want = os.environ.get("ME_WIN", "")
+for peer in (d.get("Peer") or {}).values():
+    ips = peer.get("TailscaleIPs") or []
+    if want not in ips:
+        continue
+    for ep in peer.get("RecentActiveEndpoints") or peer.get("Endpoints") or []:
+        m = re.match(r"(\d+\.\d+\.\d+\.\d+):", str(ep))
+        if m and not str(m.group(1)).startswith("100."):
+            print(m.group(1))
+            raise SystemExit(0)
+    cur = peer.get("CurAddr") or ""
+    m = re.match(r"(\d+\.\d+\.\d+\.\d+):", str(cur))
+    if m and not str(m.group(1)).startswith("100."):
+        print(m.group(1))
+' 2>/dev/null || true
+  )"
+fi
+
+echo "== scout mesh IP set (locked) =="
+echo "self_ts=$ME"
+echo "peer_windows_ts=$WIN   # Ollama MUST use this address"
+echo "peer_windows_lan=${WIN_LAN:-unknown}  # Ollama expected DOWN on LAN"
+echo "peer_ollama_lock=tailscale_only"
+echo "blackboard=${SCOUT_BLACKBOARD_URL:-http://${ME}:8765}"
 echo
-echo -n "ollama TS self: "; curl -sS --connect-timeout 2 "http://${ME}:11434/api/version" || echo DOWN
+
+echo -n "tailscale: "
+tailscale status --json 2>/dev/null | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d.get("BackendState"), d.get("Self",{}).get("Online"))' 2>/dev/null \
+  || tailscale status | head -3
+
+echo -n "ollama local:     "; curl -sS --connect-timeout 2 http://127.0.0.1:11434/api/version || echo DOWN
 echo
-echo -n "ollama TS win:  "; curl -sS --connect-timeout 2 "http://${WIN}:11434/api/version" || echo DOWN
+echo -n "ollama TS self:   "; curl -sS --connect-timeout 2 "http://${ME}:11434/api/version" || echo DOWN
 echo
+echo -n "ollama TS win:    "; curl -sS --connect-timeout 2 "http://${WIN}:11434/api/version" || echo DOWN
+echo
+if [[ -n "${WIN_LAN}" ]]; then
+  echo -n "ollama LAN win:   "; curl -sS --connect-timeout 2 "http://${WIN_LAN}:11434/api/version" || echo "DOWN (expected — peer locked to Tailscale IP set)"
+  echo
+fi
 echo -n "blackboard local: "; curl -sS --connect-timeout 2 http://127.0.0.1:8765/health || echo DOWN
 echo
 echo -n "blackboard TS:    "; curl -sS --connect-timeout 2 "http://${ME}:8765/health" || echo DOWN
 echo
-echo -n "ssh win:22 "; timeout 2 bash -c "echo >/dev/tcp/${WIN}/22" 2>/dev/null && echo open || echo closed
-echo -n "ssh me:22  "; timeout 2 bash -c "echo >/dev/tcp/${ME}/22" 2>/dev/null && echo open || echo closed
+echo -n "ssh win TS:22     "; timeout 2 bash -c "echo >/dev/tcp/${WIN}/22" 2>/dev/null && echo open || echo closed
+echo -n "ssh me:22         "; timeout 2 bash -c "echo >/dev/tcp/${ME}/22" 2>/dev/null && echo open || echo closed
 echo
+
 echo "== role endpoints (host-aware) =="
-if command -v uv >/dev/null 2>&1 && [[ -d "${SCOUT_CREW_ROOT:-$HOME/Desktop/scout_crew}" ]]; then
+if command -v uv >/dev/null 2>&1 && [[ -d "$ROOT" ]]; then
   (
-    cd "${SCOUT_CREW_ROOT:-$HOME/Desktop/scout_crew}" || exit 0
-    # shellcheck disable=SC1091
-    [[ -f .env ]] && set -a && source .env && set +a
+    cd "$ROOT" || exit 0
     export SCOUT_PEER_OLLAMA_OPENAI="${SCOUT_PEER_OLLAMA_OPENAI:-http://${WIN}:11434/v1}"
-    uv run python -c 'from scout_crew.local_llms import status; import json; s=status(); print(json.dumps({"weight_lineage": s.get("weight_lineage"), "role_endpoints": s.get("role_endpoints"), "hosts": {k: {"up": v.get("up"), "n_models": len(v.get("models") or [])} for k,v in (s.get("hosts") or {}).items()}}, indent=2))' 2>/dev/null || echo "(role endpoint probe skipped)"
+    uv run python -c '
+from scout_crew.local_llms import status
+import json
+s = status()
+print(json.dumps({
+    "weight_lineage": s.get("weight_lineage"),
+    "mesh_ip_set": s.get("mesh_ip_set"),
+    "peer_tailscale_ollama": s.get("peer_tailscale_ollama"),
+    "role_endpoints": s.get("role_endpoints"),
+    "hosts": {
+        k: {"up": v.get("up"), "n_models": len(v.get("models") or [])}
+        for k, v in (s.get("hosts") or {}).items()
+    },
+}, indent=2))
+' 2>/dev/null || echo "(role endpoint probe skipped)"
   )
 else
   echo "(uv/scout_crew not available for role probe)"
+fi
+
+echo
+echo "== lock check =="
+if curl -sS --connect-timeout 2 "http://${WIN}:11434/api/version" >/dev/null 2>&1; then
+  echo "PASS: Windows Ollama reachable on Tailscale ${WIN}:11434"
+else
+  echo "FAIL: Windows Ollama NOT reachable on locked Tailscale IP ${WIN}:11434"
+  exit 1
+fi
+if [[ -n "${WIN_LAN}" ]] && curl -sS --connect-timeout 2 "http://${WIN_LAN}:11434/api/version" >/dev/null 2>&1; then
+  echo "WARN: Windows Ollama also reachable on LAN ${WIN_LAN}:11434 (lock is Tailscale-preferred, LAN unexpected)"
+else
+  echo "PASS: LAN Ollama closed/unreachable (peer locked to Tailscale IP set)"
 fi
