@@ -48,8 +48,6 @@ ROLE_ALIASES = {
     "vet": "vet",
     "rank": "rank",
     "base": "base",
-    "llama": "base",
-    "llama3.1": "base",
 }
 
 ROLE_SYSTEM_PROMPTS: Dict[str, str] = {
@@ -101,7 +99,7 @@ ROLE_SYSTEM_PROMPTS: Dict[str, str] = {
         "- For channel ranking requests, return compact ranking JSON; otherwise answer directly."
     ),
     "base": (
-        "You are a local Ollama assistant (llama base).\n"
+        "You are a local Ollama assistant (qwen3 base).\n"
         "PROMPT SYNTAX:\n"
         "- === USER QUERY === is mandatory — answer it fully.\n"
         "- No cloud APIs. No tool-call envelopes unless asked."

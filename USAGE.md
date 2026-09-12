@@ -152,6 +152,7 @@ scout crew -v
 scout crew --inputs ./my_inputs.json
 scout crew --transcript "Unit 1 radar on I-5..." --dev-mode DEBUG --dev-request "Explain vet failure modes"
 scout crew --keep-cwd    # do not chdir to project root
+scout crew --orchestrated   # manager calls specialists as agentic tools
 ```
 
 Flags:
@@ -164,7 +165,14 @@ Flags:
 | `--dev-request` | Instructions for scout-dev admin task |
 | `-p` / `--prompt` / `--user-prompt` | Operator prompt (converted to PROMPT SYNTAX v1) |
 | `--keep-cwd` | Stay in caller cwd (outputs may land elsewhere) |
+| `--orchestrated` | Specialists run as manager tools (specialist_alert/intel/vet/rank/core), one-shot contracts, no per-specialist agents |
 | `-v/--verbose` | Print roster on stderr before kickoff |
+
+`--orchestrated` (or `SCOUT_ORCHESTRATED=1`) switches the crew from the
+seven-agent sequential pipeline to a manager + dev structure where the manager
+calls each specialist through an agentic tool. The tools bind the same role
+models and PROMPT SYNTAX v1 contracts and stay local/mesh-only. Default mode is
+unchanged.
 
 Also available via CrewAI:
 

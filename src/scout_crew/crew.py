@@ -14,11 +14,13 @@
 
 from __future__ import annotations
 
+import os
+
 from crewai import Agent, Crew, Process, Task
 from crewai.agents.agent_builder.base_agent import BaseAgent
 from crewai.project import CrewBase, agent, crew, task
 
-from scout_crew.tools import tools_for_role
+from scout_crew.tools import orchestrated_manager_tools, tools_for_role
 from scout_crew.admin_policy import (
     ADMIN_AGENT_KEYS,
     ANTI_RECURSION_RULES,
@@ -27,6 +29,11 @@ from scout_crew.admin_policy import (
     validate_task_context_dag,
 )
 from scout_crew.local_llms import assert_local_only, make_llm
+from scout_crew.tools.specialist_tools import ORCHESTRATED_SYNTHESIS_OVERRIDE
+
+
+def _env_flag(name: str) -> bool:
+    return os.getenv(name, "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _with_policy_text(config: dict, *, admin: bool) -> dict:
@@ -45,23 +52,37 @@ def _with_policy_text(config: dict, *, admin: bool) -> dict:
 
 @CrewBase
 class ScoutCrew:
-    """Local Scout crew: sequential pipeline, admin manager+dev, no recursion loops."""
+    """Local Scout crew: sequential pipeline, admin manager+dev, no recursion loops.
+
+    Default mode runs the seven-agent sequential pipeline. With
+    SCOUT_ORCHESTRATED=1 (scout crew --orchestrated) the manager drives the
+    alert/intel/vet/rank/core specialists as *tools* instead of separate tasks —
+    same contracts, fewer agents, manager-owned synthesis.
+    """
 
     agents: list[BaseAgent]
     tasks: list[Task]
 
-    def _build_agent(self, key: str, role_llm: str, temperature: float, max_tokens: int) -> Agent:
+    def _build_agent(
+        self,
+        key: str,
+        role_llm: str,
+        temperature: float,
+        max_tokens: int,
+        tools: list | None = None,
+    ) -> Agent:
         admin = key in ADMIN_AGENT_KEYS
         config = _with_policy_text(self.agents_config[key], admin=admin)  # type: ignore[index]
         kwargs = agent_runtime_kwargs(key)
         # Shared multi-machine blackboard tools (role-ACL enforced in tool/store).
         # specialists/core -> write pipeline; manager -> summarize/rewrite pipeline;
         # dev -> dev_debug only; hermes (external) would be read-only via tools_for_role.
-        bb_tools = tools_for_role(key)
+        if tools is None:
+            tools = tools_for_role(key)
         return Agent(
             config=config,  # type: ignore[arg-type]
             llm=make_llm(role_llm, temperature=temperature, max_tokens=max_tokens),
-            tools=bb_tools,
+            tools=tools,
             verbose=True,
             **kwargs,
         )
@@ -69,7 +90,9 @@ class ScoutCrew:
     @agent
     def local_manager(self) -> Agent:
         # Admin: synthesizes final brief; may one-hop consult specialists only.
-        return self._build_agent("local_manager", "manager", temperature=0.1, max_tokens=3072)
+        # In orchestrated mode the manager gets one agentic tool per specialist.
+        tools = orchestrated_manager_tools() if _env_flag("SCOUT_ORCHESTRATED") else None
+        return self._build_agent("local_manager", "manager", temperature=0.1, max_tokens=3072, tools=tools)
 
     @agent
     def dev_specialist(self) -> Agent:
@@ -133,7 +156,11 @@ class ScoutCrew:
 
     @crew
     def crew(self) -> Crew:
-        """Sequential crew: fixed task owners, admin manager+dev, loop-safe."""
+        """Sequential crew: fixed task owners, admin manager+dev, loop-safe.
+
+        SCOUT_ORCHESTRATED=1 switches to orchestrated mode: specialists are tools
+        on the manager and only dev_task + manager_synthesis_task run.
+        """
         assert_local_only()
         # Prefer raw YAML for DAG checks (CrewBase may hydrate context into Task objs).
         import yaml
@@ -142,8 +169,12 @@ class ScoutCrew:
         yaml_path = _P(__file__).resolve().parent / "config" / "tasks.yaml"
         raw_tasks = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
         validate_task_context_dag(raw_tasks)
-        validate_admin_partition(
-            [
+
+        orchestrated = _env_flag("SCOUT_ORCHESTRATED")
+        if orchestrated:
+            roster_keys = ["local_manager", "dev_specialist"]
+        else:
+            roster_keys = [
                 "local_manager",
                 "dev_specialist",
                 "alert_specialist",
@@ -152,23 +183,38 @@ class ScoutCrew:
                 "rank_specialist",
                 "core_specialist",
             ]
-        )
+        validate_admin_partition(roster_keys)
 
-        # Explicit roster (includes admins). Sequential process uses task.agent bindings
-        # so work is not re-routed through a hierarchical manager planner loop.
-        roster = [
-            self.local_manager(),
-            self.dev_specialist(),
-            self.alert_specialist(),
-            self.intel_specialist(),
-            self.vet_specialist(),
-            self.rank_specialist(),
-            self.core_specialist(),
-        ]
+        if orchestrated:
+            # Only admin agents run; specialists are reached via manager tools.
+            agents = [self.local_manager(), self.dev_specialist()]
+            dev_task = self.dev_task()
+            # Specialist tasks don't exist in this DAG — drop their stale context.
+            dev_task.context = []
+            mgr_task = self.manager_synthesis_task()
+            mgr_task.context = [dev_task]
+            mgr_task.description = (
+                (mgr_task.description or "")
+                + ORCHESTRATED_SYNTHESIS_OVERRIDE
+            )
+            tasks: list[Task] = [dev_task, mgr_task]
+        else:
+            # Explicit roster (includes admins). Sequential process uses task.agent
+            # bindings so work is not re-routed through a hierarchical manager loop.
+            agents = [
+                self.local_manager(),
+                self.dev_specialist(),
+                self.alert_specialist(),
+                self.intel_specialist(),
+                self.vet_specialist(),
+                self.rank_specialist(),
+                self.core_specialist(),
+            ]
+            tasks = self.tasks
 
         return Crew(
-            agents=roster,
-            tasks=self.tasks,
+            agents=agents,
+            tasks=tasks,
             process=Process.sequential,
             verbose=True,
             memory=False,

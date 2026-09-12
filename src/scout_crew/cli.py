@@ -194,6 +194,8 @@ def cmd_chat(args: argparse.Namespace) -> int:
 
 def cmd_crew(args: argparse.Namespace) -> int:
     assert_local_only()
+    if getattr(args, "orchestrated", False):
+        os.environ["SCOUT_ORCHESTRATED"] = "1"
     # Ensure cwd-sensitive outputs land under project unless user overrides
     if not args.keep_cwd:
         os.chdir(_PROJECT_ROOT)
@@ -443,6 +445,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Operator prompt for the manager (user_prompt input)",
     )
     s.add_argument("--keep-cwd", action="store_true", help="Do not chdir to project root")
+    s.add_argument(
+        "--orchestrated",
+        action="store_true",
+        help="Manage specialists as agentic tools on the manager (scout crew --orchestrated)",
+    )
     s.add_argument("-v", "--verbose", action="store_true")
     s.set_defaults(func=cmd_crew)
 
