@@ -28,6 +28,16 @@ Why:
 - Every specialist call still obeys the role's contract, its own model/endpoint
   (OLLAMA_HOST_* / SCOUT_PEER_*), and the local-only guard (assert_local_only).
 
+Agentic-tool invariants (do not loosen):
+- NON-REASONING: tools bind the /no_think specialist tags and never enable
+  thinking; fallbacks stay within the no_think specialist chain. The manager is
+  the only reasoning stage.
+- LOW TEMPERATURE: every tool pins temperature=0.0 (deterministic contracts);
+  the manager cannot pass a temperature through a tool argument.
+- NON-PERSONA: each tool substitutes a neutral contract system prompt (no role
+  persona/backstory, no "you are scout-X" framing) — the specialist acts as a
+  pure contract executor, not a character.
+
 Tools never write to the blackboard themselves — the manager synthesizes and
 writes the summary/rewrite per blackboard ACL.
 """
@@ -42,54 +52,73 @@ from pydantic import BaseModel, Field
 from scout_crew.local_llms import assert_local_only, make_llm
 from scout_crew.prompt_syntax import build_chat_messages
 
-# Role -> per-call budget + tool description (temperature 0 for contract roles).
-# max_tokens mirrors the equivalent CrewAI specialist agent's cap in crew.py.
+# Role -> contract-only system prompt + per-call budget (temperature pinned 0.0:
+# deterministic contracts, non-reasoning tags, non-persona system).
 SPECIALIST_ROLES = {
     "alert": {
-        "temperature": 0.0,
         "max_tokens": 1024,
+        "system": (
+            "You are the traffic-enforcement decision step. Apply the exact "
+            "output contract; nothing else."
+        ),
         "description": (
-            "Call the scout-alert specialist. Give it a scanner transcript and it "
-            "returns either exactly 'IGNORE' or one 'ALERT: ...' sentence with "
-            "verbatim enforcement locations. Use for traffic-enforcement decisioning."
+            "Call the scout-alert decision step. Give it a scanner transcript and "
+            "it returns either exactly 'IGNORE' or one 'ALERT: ...' sentence with "
+            "verbatim enforcement locations. Deterministic (temperature 0, no "
+            "thinking, no persona). Use for traffic-enforcement decisioning."
         ),
     },
     "intel": {
-        "temperature": 0.0,
         "max_tokens": 1536,
+        "system": (
+            "You are the dispatch-intel extraction step. Apply the exact JSON "
+            "output contract; nothing else."
+        ),
         "description": (
-            "Call the scout-intel specialist. Give it a scanner transcript and it "
-            "returns STRICT JSON with keys call_types, priority, codes, units, "
-            "locations, pois, summary. Use to extract structured dispatch intel."
+            "Call the scout-intel extraction step. Give it a scanner transcript and "
+            "it returns STRICT JSON with keys call_types, priority, codes, units, "
+            "locations, pois, summary. Deterministic. Use to extract structured "
+            "dispatch intel."
         ),
     },
     "vet": {
-        "temperature": 0.0,
         "max_tokens": 768,
+        "system": (
+            "You are the alert-vetting gate step. Apply the exact pass/fail "
+            "output contract; nothing else."
+        ),
         "description": (
-            "Call the scout-vet specialist. Give it a transcript (and a proposed "
+            "Call the scout-vet gate step. Give it a transcript (and a proposed "
             "ALERT line when you have one) and it returns exactly 'VET_PASS' or "
-            "'VET_FAIL'. Use to gate a proposed alert on clear roadway enforcement "
-            "or an immediate driving hazard."
+            "'VET_FAIL'. Deterministic. Use to gate a proposed alert on clear "
+            "roadway enforcement or an immediate driving hazard."
         ),
     },
     "rank": {
-        "temperature": 0.0,
         "max_tokens": 1536,
+        "system": (
+            "You are the channel-ranking step. Apply the exact JSON output "
+            "contract; nothing else."
+        ),
         "description": (
-            "Call the scout-rank specialist. Give it the location context JSON and "
-            "the channel_candidates JSON and it returns compact ranking JSON "
-            '{"ranked":[...],"top_id":"..."}. Never invent candidates.'
+            "Call the scout-rank step. Give it the location context JSON and the "
+            "channel_candidates JSON and it returns compact ranking JSON "
+            '{"ranked":[...],"top_id":"..."}. Deterministic; never invent '
+            "candidates."
         ),
     },
     "core": {
-        "temperature": 0.1,
         "max_tokens": 2048,
+        "system": (
+            "You are the driver-package build step. Apply the exact JSON output "
+            "contract; nothing else."
+        ),
         "description": (
-            "Call the scout-core specialist. Give it route context, the transcript, "
-            "and any alert/intel/vet/rank results you already have, and it returns "
-            "the driver-facing JSON package (nav_line, chat, alert, vet, intel, "
-            "channels, manager_notes). Use as the operational package builder."
+            "Call the scout-core package step. Give it route context, the "
+            "transcript, and any alert/intel/vet/rank results you already have, "
+            "and it returns the driver-facing JSON package (nav_line, chat, "
+            "alert, vet, intel, channels, manager_notes). Deterministic. Use as "
+            "the operational package builder."
         ),
     },
 }
@@ -129,10 +158,17 @@ class _SpecialistIn(BaseModel):
 
 
 class SpecialistToolBase(BaseTool):
-    """Tool that routes a prompt to a single specialist model (local/mesh)."""
+    """Tool that routes a prompt to a single specialist model (local/mesh).
+
+    Two fields the manager can never change through tool arguments:
+    - temperature is pinned to 0.0 (deterministic contracts)
+    - role_key selects the non-reasoning /no_think specialist tag
+    The non-persona system prompt is applied for every call.
+    """
 
     args_schema: Type[BaseModel] = _SpecialistIn
     role_key: str = "alert"
+    system: str = ""
     temperature: float = 0.0
     max_tokens: int = 1024
 
@@ -142,14 +178,16 @@ class SpecialistToolBase(BaseTool):
             return "ERROR: empty prompt."
         try:
             assert_local_only()
+            system_prompt = self.system or "Apply the exact output contract."
             system, enveloped = build_chat_messages(
                 prompt,
-                role=self.role_key,
+                role="custom",
+                system_override=system_prompt,
                 source="orchestrated-manager",
             )
             llm = make_llm(
                 self.role_key,
-                temperature=self.temperature,
+                temperature=self.temperature,  # always 0.0
                 max_tokens=self.max_tokens,
             )
             out = llm.call(f"{system}\n\n{enveloped}")
@@ -171,7 +209,8 @@ def specialist_tools_for_orchestration() -> list:
                 "name": f"specialist_{role}",
                 "description": cfg["description"],
                 "role_key": role,
-                "temperature": cfg["temperature"],
+                "system": cfg["system"],
+                "temperature": 0.0,
                 "max_tokens": cfg["max_tokens"],
             },
         )

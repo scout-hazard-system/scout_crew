@@ -171,8 +171,11 @@ Flags:
 `--orchestrated` (or `SCOUT_ORCHESTRATED=1`) switches the crew from the
 seven-agent sequential pipeline to a manager + dev structure where the manager
 calls each specialist through an agentic tool. The tools bind the same role
-models and PROMPT SYNTAX v1 contracts and stay local/mesh-only. Default mode is
-unchanged.
+models and PROMPT SYNTAX v1 contracts and stay local/mesh-only. Invariants on
+every agentic tool: **non-reasoning** (`/no_think` specialist tags, never
+enables thinking), **low temperature** (pinned `0.0`), **non-persona**
+(contract-only system prompt, no role persona/backstory). The manager is the
+only reasoning stage. Default mode is unchanged.
 
 Also available via CrewAI:
 
