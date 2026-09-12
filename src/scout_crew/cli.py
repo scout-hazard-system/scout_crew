@@ -50,7 +50,9 @@ from scout_crew.arizona_phase import (  # noqa: E402
 from scout_crew.local_llms import (  # noqa: E402
     assert_local_only,
     make_llm,
+    mesh_ip_set,
     model_roster,
+    resolve_role_host,
     resolve_role_model,
     status,
 )
@@ -146,24 +148,27 @@ def cmd_chat(args: argparse.Namespace) -> int:
     if role == "custom":
         from crewai import LLM
 
+        route_base = os.environ["OPENAI_BASE_URL"]
         llm = LLM(
             model=f"ollama/{model}" if "/" not in model else model,
-            base_url=os.environ["OPENAI_BASE_URL"],
+            base_url=route_base,
             api_key=os.environ["OPENAI_API_KEY"],
             temperature=args.temperature,
             max_tokens=args.max_tokens,
         )
     else:
         llm = make_llm(role, temperature=args.temperature, max_tokens=args.max_tokens)
+        route_base = f"{resolve_role_host(role).rstrip('/')}/v1"
 
     if args.verbose:
         print(
             json.dumps(
                 {
-                    "route": "local-ollama",
+                    "route": "mesh-ollama" if role in {"manager", "hermes"} else "local-ollama",
                     "role": role,
                     "model": getattr(llm, "model", model),
-                    "base_url": os.environ["OPENAI_BASE_URL"],
+                    "base_url": route_base,
+                    "mesh_ip_set": mesh_ip_set(),
                     "external_token_usage": False,
                     "prompt_syntax": "v1",
                     "envelope": True,
@@ -262,6 +267,7 @@ def cmd_crew(args: argparse.Namespace) -> int:
         json.dumps(az_status, indent=2) + "\n", encoding="utf-8"
     )
     if args.verbose:
+        print("Mesh IP set:", json.dumps(mesh_ip_set(), indent=2), file=sys.stderr)
         print("Local model roster:", json.dumps(model_roster(), indent=2), file=sys.stderr)
 
     result = ScoutCrew().crew().kickoff(inputs=inputs)
@@ -304,6 +310,34 @@ def cmd_blackboard(args: argparse.Namespace) -> int:
     client = BlackboardClient()
     if args.bb_action == "stats":
         print(_json.dumps(client.stats(), indent=2))
+        return 0
+    if args.bb_action == "authorize":
+        result = client.authorize(
+            device_id=args.device or "",
+            entry_token=args.entry_token or "",
+            captcha_token=args.captcha_token or "",
+            role=args.role or "alert",
+            categories=[c.strip() for c in (args.categories or "pipeline").split(",") if c.strip()],
+            ttl=args.ttl or 3600,
+        )
+        print(_json.dumps(result, indent=2))
+        return 0
+    if args.bb_action == "issue-token":
+        result = client.issue(
+            role=args.role or "alert",
+            categories=[c.strip() for c in (args.categories or "pipeline").split(",") if c.strip()],
+            device_id=args.device or "",
+            ttl=args.ttl or 3600,
+        )
+        print(_json.dumps(result, indent=2))
+        return 0
+    if args.bb_action == "revoke":
+        result = client.revoke(args.jti or "")
+        print(_json.dumps(result, indent=2))
+        return 0
+    if args.bb_action == "audit":
+        result = client.audit(limit=args.limit or 200)
+        print(_json.dumps(result, indent=2))
         return 0
     if args.bb_action == "snapshot":
         snap = client.snapshot(role=args.role or "operator", limit_per_category=args.limit)
@@ -418,7 +452,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     s.add_argument(
         "bb_action",
-        choices=["stats", "snapshot", "read", "write"],
+        choices=[
+            "stats",
+            "snapshot",
+            "read",
+            "write",
+            "issue-token",
+            "authorize",
+            "revoke",
+            "audit",
+        ],
         help="Blackboard action",
     )
     s.add_argument("--category", default="pipeline", help="pipeline | dev_debug")
@@ -430,6 +473,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--title", default="")
     s.add_argument("--body", default="")
     s.add_argument("--tags", default="", help="comma-separated tags")
+    s.add_argument("--device", default="", help="device-id for authorize/issue")
+    s.add_argument("--categories", default="pipeline", help="comma-separated token categories")
+    s.add_argument("--ttl", type=int, default=3600, help="token lifetime seconds")
+    s.add_argument("--entry-token", default="", help="entry proof for authorize")
+    s.add_argument("--captcha-token", default="", help="captcha proof (framework seam)")
+    s.add_argument("--jti", default="", help="token jti to revoke")
     s.set_defaults(func=cmd_blackboard)
 
     return p

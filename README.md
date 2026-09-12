@@ -5,7 +5,7 @@
 Local-only [CrewAI](https://crewai.com) multi-agent system for on-device **scout** models served by [Ollama](https://ollama.com).
 
 **Design goals**
-- Zero cloud LLM token usage (loopback or private Tailscale Ollama peers only)
+- Zero cloud LLM token usage (loopback or private Scout Mesh / LAN Ollama peers only)
 - Default weights: **Qwen3** (`qwen3:8b` / `scout-*` / `scout-hermes-hc*`); Apache-2.0 source
 - Role-specialized scout models + admin manager / scout-dev
 - Sequential pipeline with anti-recursion guards
@@ -58,7 +58,7 @@ curl -s http://127.0.0.1:11434/api/tags | head
 
 | Role | Model tag | Notes |
 |------|-----------|--------|
-| Manager (admin) | `scout-hermes-hc1.0.0` / `1.1.0` | Qwen3 high-context; may run on Windows mesh peer |
+| Manager (admin) | `scout-hermes-hc1.0.0` / `1.1.0` | Qwen3 high-context; may run on the Scout Mesh peer host |
 | Dev (admin) | `scout-dev` | Qwen3 specialist |
 | Core / nav / chat | `scout-core1.0.5` | Qwen3 |
 | Alert | `scout-alert` | Qwen3 |
@@ -293,7 +293,7 @@ eval "$(scout env)"
 | `scout dev -p "…"` | admin shortcut → `scout-dev` |
 | `scout crew [-v] [--inputs file.json]` | full sequential crew |
 | `scout-gui` | desktop control plane + terminal |
-| `scout-mesh-status` | Tailscale + dual Ollama + role endpoints |
+| `scout-mesh-status` | Scout Mesh (scoutwg0) + Ollama + blackboard + map server |
 | `crewai run` | CrewAI project entry (same crew) |
 
 ---

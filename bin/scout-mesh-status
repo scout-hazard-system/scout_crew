@@ -13,34 +13,109 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Quick mesh health: Tailscale + Ollama + blackboard + peer probes
+# Quick mesh health: Scout Mesh (WireGuard scoutwg0) + Ollama + blackboard + map server
+# Peer Ollama is reached on its scoutwg0 mesh IP set (10.66.x.x), not LAN.
 set -u
-ME="${SCOUT_TAILSCALE_IP:-$(tailscale ip -4 2>/dev/null | head -1)}"
-WIN="${SCOUT_PEER_WINDOWS_IP:-100.82.130.47}"
-echo "me=$ME win=$WIN"
-echo -n "tailscale: "; tailscale status --json 2>/dev/null | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d.get("BackendState"), d.get("Self",{}).get("Online"))' 2>/dev/null || tailscale status | head -3
-echo -n "ollama local: "; curl -sS --connect-timeout 2 http://127.0.0.1:11434/api/version || echo DOWN
+ROOT="${SCOUT_CREW_ROOT:-$HOME/Desktop/scout_crew}"
+if [[ -f "$ROOT/.env" ]]; then
+  # shellcheck disable=SC1091
+  set -a && source "$ROOT/.env" && set +a
+fi
+
+HUB="${SCOUT_MESH_HUB_ADDRESS:-10.66.2.3}"
+IFACE="${SCOUT_MESH_IFACE:-scoutwg0}"
+CIDR="${SCOUT_MESH_CIDR:-10.66.0.0/16}"
+PEER="${SCOUT_PEER_MESH_IP:-}"
+# The Windows harness is an off-mesh admin host: it has no scoutwg0 peer and no
+# blackboard role, so a missing PEER is normal there (map data flows via Pop!_OS
+# peers). Set SCOUT_PEER_MESH_LAN_IP to verify the peer is NOT answering on LAN.
+PEER_LAN="${SCOUT_PEER_MESH_LAN_IP:-}"
+BB="${SCOUT_BLACKBOARD_URL:-http://${HUB}:8765}"
+MAP="${SCOUT_MAP_BASE_URL:-http://${HUB}:18080}"
+
+echo "== scout mesh IP set (WireGuard scoutwg0) =="
+echo "mesh_provider=wireguard"
+echo "iface=$IFACE"
+echo "mesh_cidr=$CIDR"
+echo "hub=$HUB   # map server :18080 + blackboard :8765"
+echo "peer_mesh_ip=${PEER:-unset}   # peer Ollama MUST use this address"
+echo "peer_ollama_lock=mesh_only"
+echo "blackboard=$BB"
+echo "map_server=$MAP"
 echo
-echo -n "ollama TS self: "; curl -sS --connect-timeout 2 "http://${ME}:11434/api/version" || echo DOWN
+
+# scoutwg0 status (read-only). If the interface is up, show its IPv4.
+WG_STATE="down"
+LOCAL_WG=""
+if wg show "$IFACE" >/dev/null 2>&1; then
+  WG_STATE="up"
+  LOCAL_WG="$(ip -4 addr show dev "$IFACE" 2>/dev/null | awk '/inet /{print $2}' | head -1)"
+fi
+echo -n "scoutwg0:         "; echo "${LOCAL_WG:-${WG_STATE}}"
+echo -n "wg peers:         "
+if [[ "$WG_STATE" == "up" ]]; then
+  n_peers="$(wg show "$IFACE" peers 2>/dev/null | wc -l)"
+  echo "up (${n_peers} peer(s))"
+else
+  echo "down/$IFACE not present (off-mesh harness may skip WireGuard)"
+fi
+echo -n "ollama local:     "; curl -sS --connect-timeout 2 http://127.0.0.1:11434/api/version || echo DOWN
 echo
-echo -n "ollama TS win:  "; curl -sS --connect-timeout 2 "http://${WIN}:11434/api/version" || echo DOWN
+echo -n "ollama hub:       "; curl -sS --connect-timeout 2 "http://${HUB}:11434/api/version" || echo DOWN
 echo
-echo -n "blackboard local: "; curl -sS --connect-timeout 2 http://127.0.0.1:8765/health || echo DOWN
+if [[ -n "$PEER" ]]; then
+  echo -n "ollama mesh peer: "; curl -sS --connect-timeout 2 "http://${PEER}:11434/api/version" || echo DOWN
+  echo
+fi
+echo -n "blackboard hub:   "; curl -sS --connect-timeout 2 "$BB/health" || echo DOWN
 echo
-echo -n "blackboard TS:    "; curl -sS --connect-timeout 2 "http://${ME}:8765/health" || echo DOWN
+echo -n "map server hub:   "; curl -sS --connect-timeout 2 "$MAP/api/health" || echo DOWN
 echo
-echo -n "ssh win:22 "; timeout 2 bash -c "echo >/dev/tcp/${WIN}/22" 2>/dev/null && echo open || echo closed
-echo -n "ssh me:22  "; timeout 2 bash -c "echo >/dev/tcp/${ME}/22" 2>/dev/null && echo open || echo closed
+echo -n "ssh hub:22        "; timeout 2 bash -c "echo >/dev/tcp/${HUB}/22" 2>/dev/null && echo open || echo closed
 echo
+
 echo "== role endpoints (host-aware) =="
-if command -v uv >/dev/null 2>&1 && [[ -d "${SCOUT_CREW_ROOT:-$HOME/Desktop/scout_crew}" ]]; then
+if command -v uv >/dev/null 2>&1 && [[ -d "$ROOT" ]]; then
   (
-    cd "${SCOUT_CREW_ROOT:-$HOME/Desktop/scout_crew}" || exit 0
-    # shellcheck disable=SC1091
-    [[ -f .env ]] && set -a && source .env && set +a
-    export SCOUT_PEER_OLLAMA_OPENAI="${SCOUT_PEER_OLLAMA_OPENAI:-http://${WIN}:11434/v1}"
-    uv run python -c 'from scout_crew.local_llms import status; import json; s=status(); print(json.dumps({"weight_lineage": s.get("weight_lineage"), "role_endpoints": s.get("role_endpoints"), "hosts": {k: {"up": v.get("up"), "n_models": len(v.get("models") or [])} for k,v in (s.get("hosts") or {}).items()}}, indent=2))' 2>/dev/null || echo "(role endpoint probe skipped)"
+    cd "$ROOT" || exit 0
+    export SCOUT_PEER_OLLAMA_OPENAI="${SCOUT_PEER_OLLAMA_OPENAI:-http://${PEER:-$HUB}:11434/v1}"
+    uv run python -c '
+from scout_crew.local_llms import status
+import json
+s = status()
+print(json.dumps({
+    "weight_lineage": s.get("weight_lineage"),
+    "mesh_ip_set": s.get("mesh_ip_set"),
+    "peer_mesh_ollama": s.get("peer_mesh_ollama"),
+    "hub_blackboard": s.get("hub_blackboard"),
+    "role_endpoints": s.get("role_endpoints"),
+    "hosts": {
+        k: {"up": v.get("up"), "n_models": len(v.get("models") or [])}
+        for k, v in (s.get("hosts") or {}).items()
+    },
+}, indent=2))
+' 2>/dev/null || echo "(role endpoint probe skipped)"
   )
 else
   echo "(uv/scout_crew not available for role probe)"
+fi
+
+echo
+echo "== lock check =="
+if [[ -n "$PEER" ]]; then
+  if curl -sS --connect-timeout 2 "http://${PEER}:11434/api/version" >/dev/null 2>&1; then
+    echo "PASS: peer Ollama reachable on scoutwg0 ${PEER}:11434"
+  else
+    echo "FAIL: peer Ollama NOT reachable on locked mesh IP ${PEER}:11434"
+    exit 1
+  fi
+  if [[ -n "$PEER_LAN" ]] && curl -sS --connect-timeout 2 "http://${PEER_LAN}:11434/api/version" >/dev/null 2>&1; then
+    echo "WARN: peer Ollama also reachable on LAN ${PEER_LAN}:11434 (mesh-only expected)"
+  else
+    echo "PASS: LAN peer Ollama closed/unreachable (locked to scoutwg0)"
+  fi
+else
+  echo "NOTE: no mesh Ollama peer configured (SCOUT_PEER_MESH_IP unset)."
+  echo "      The Windows harness is off-mesh; populate SCOUT_PEER_MESH_IP on a"
+  echo "      scoutwg0 peer host to enforce the mesh-only Ollama lock."
 fi
