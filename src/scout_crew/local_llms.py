@@ -77,6 +77,14 @@ ROLE_MODEL_PREFS: Dict[str, List[str]] = {
         "scout-hermes-hc1.1.0-64k",
         "qwen3:8b",
     ],
+    "pa": [
+        "scout-hermes-pa300k",
+        "scout-hermes-hc1.1.0",
+        "scout-hermes-hc1.0.0",
+        "scout-hermes-hc1.0.0-64k",
+        "scout-hermes-hc1.1.0-64k",
+        "qwen3:8b",
+    ],
 }
 
 ENV_OVERRIDES = {
@@ -89,6 +97,7 @@ ENV_OVERRIDES = {
     "dev": "OLLAMA_MODEL_DEV",
     "base": "OLLAMA_MODEL_BASE",
     "hermes": "OLLAMA_MODEL_HERMES",
+    "pa": "OLLAMA_MODEL_PA",
 }
 
 # Per-role Ollama base URL overrides (no /v1). Empty -> OLLAMA_HOST.
@@ -104,6 +113,7 @@ ENV_HOST_OVERRIDES = {
     "dev": "OLLAMA_HOST_DEV",
     "base": "OLLAMA_HOST_BASE",
     "hermes": "OLLAMA_HOST_HERMES",
+    "pa": "OLLAMA_HOST_PA",
 }
 
 

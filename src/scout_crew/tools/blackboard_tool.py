@@ -213,6 +213,13 @@ def tools_for_role(role: str) -> list:
             BlackboardReadTool(role="hermes"),
             BlackboardSnapshotTool(role="hermes"),
         ]
+    # pa: personal assistant - full read/write access
+    if r in {"pa", "assistant", "personal"}:
+        return [
+            BlackboardReadTool(role="pa"),
+            BlackboardSnapshotTool(role="pa"),
+            BlackboardWriteTool(role="pa"),
+        ]
     if r in {"manager", "local_manager", "mgr", "admin"}:
         return [
             BlackboardReadTool(role="manager"),
