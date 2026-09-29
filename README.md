@@ -21,7 +21,7 @@ Local-only [CrewAI](https://crewai.com) multi-agent system for on-device **scout
 
 | Doc | Contents |
 |-----|----------|
-| **This README** | Setup + verification checklist (start here) |
+| **This README** | Project scope, unique functions/scripts, verification checklist |
 | **[SETUP.md](SETUP.md)** | Expanded install, architecture, day-2 ops |
 | **[USAGE.md](USAGE.md)** | Full CLI/GUI reference, inputs/outputs, troubleshooting |
 | **[AGENTS.md](AGENTS.md)** | CrewAI patterns for coding assistants |
@@ -29,36 +29,33 @@ Local-only [CrewAI](https://crewai.com) multi-agent system for on-device **scout
 
 ---
 
-## Prerequisites
+## Project Scope
 
-| Requirement | Notes |
-|-------------|--------|
-| Python | `>=3.10,<3.14` |
-| [uv](https://docs.astral.sh/uv/) | package / tool runner |
-| CrewAI CLI | `uv tool install crewai` (optional global; project uses its own venv) |
-| Ollama | listening on `127.0.0.1:11434` |
-| Scout models | roster below |
+Scout Crew is a **local-first, zero-cloud** multi-agent orchestration layer built on CrewAI that routes all LLM inference through Ollama. It is designed for in-vehicle / edge scenarios where connectivity is unreliable, data must stay on-device, and the model roster is fixed to Apache-2.0-licensed Qwen3 derivatives.
 
-### Install host tools
+### Core Domain: Traffic Enforcement Intelligence
 
-```bash
-# uv
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source "$HOME/.local/bin/env"   # if needed
+The pipeline processes **scanner transcripts** (Broadcastify / live radio) through a sequential specialist chain:
 
-# CrewAI CLI (optional)
-uv tool install crewai
-
-# Ollama must be running
-ollama serve    # if not already a service
-curl -s http://127.0.0.1:11434/api/tags | head
+```
+alert → intel → vet → rank → core → dev (admin) → manager synthesis (admin)
 ```
 
-### Recommended Ollama models
+Each specialist has a narrow, verifiable contract:
+- **alert** → `ALERT: <sentence with verbatim locations>` or `IGNORE`
+- **intel** → strict JSON: `call_types, priority, codes, units, locations, pois, summary`
+- **vet** → `VET_PASS` or `VET_FAIL`
+- **rank** → compact ranked JSON of channel candidates
+- **core** → driver-facing JSON: `nav_line`, `chat`, `alert`, `vet`, `intel`, `channels`, `manager_notes`
+- **dev (admin)** → structured dev brief with patches, verification commands, rollback notes
+- **manager (admin)** → final operational brief JSON answering the operator prompt **first**, then completing synthesis
+
+### Model Roster
 
 | Role | Model tag | Notes |
 |------|-----------|--------|
 | Manager (admin) | `scout-hermes-hc1.0.0` / `1.1.0` | Qwen3 high-context; may run on the Scout Mesh peer host |
+| PA (assistant) | `scout-hermes-pa300k` | 300k context, thinking enabled, full tool access |
 | Dev (admin) | `scout-dev` | Qwen3 specialist |
 | Core / nav / chat | `scout-core1.0.5` | Qwen3 |
 | Alert | `scout-alert` | Qwen3 |
@@ -67,210 +64,252 @@ curl -s http://127.0.0.1:11434/api/tags | head
 | Rank | `scout-rank` | Qwen3 |
 | Fallback | `qwen3:8b` | never Llama |
 
-Build / refresh from the sibling llm tree:
+### Alpha Development Phase (Arizona Jurisdiction Lock)
 
-```bash
-ollama create scout-dev -f ~/Desktop/llm/dev/Modelfile.scout-dev
-# or full set:
-bash ~/Desktop/llm/build/build_llm_set.sh
-ollama list | egrep 'scout-|qwen3:8b'
-```
-
----
-
-## Setup
-
-### 1. Clone and install the project
-
-```bash
-cd ~/Desktop/scout_crew          # or: git clone https://github.com/wendigoro/scout_crew.git
-cp -n .env.example .env
-crewai install                   # creates .venv + installs deps (CrewAI, PySide6, …)
-
-mkdir -p ~/.local/bin
-ln -sfn "$(pwd)/bin/scout" ~/.local/bin/scout
-ln -sfn "$(pwd)/bin/scout-gui" ~/.local/bin/scout-gui
-hash -r
-```
-
-### 2. Local-only environment
-
-`.env` must keep traffic on loopback (see `.env.example`):
-
-```bash
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-OPENAI_API_KEY=ollama
-OPENAI_API_BASE=http://127.0.0.1:11434/v1
-OPENAI_BASE_URL=http://127.0.0.1:11434/v1
-OLLAMA_MODEL_MANAGER=ollama/scout-hermes-hc1.0.0
-OLLAMA_MODEL_HERMES=ollama/scout-hermes-hc1.0.0
-OLLAMA_MODEL_CORE=ollama/scout-core1.0.5
-OLLAMA_MODEL_VET=ollama/scout-vet1.0.6
-OLLAMA_MODEL_ALERT=ollama/scout-alert
-OLLAMA_MODEL_INTEL=ollama/scout-intel
-OLLAMA_MODEL_RANK=ollama/scout-rank
-OLLAMA_MODEL_DEV=ollama/scout-dev
-OLLAMA_MODEL_BASE=ollama/qwen3:8b
-CREWAI_TRACING_ENABLED=true
-# Optional mesh: SCOUT_PEER_OLLAMA_OPENAI=http://WINDOWS_TS_IP:11434/v1
-```
-
-- Do **not** point `OPENAI_BASE_URL` at cloud hosts.
-- Dummy key `OPENAI_API_KEY=ollama` is intentional for OpenAI-compatible clients.
-- `assert_local_only()` refuses common cloud provider env keys.
-
-Route other OpenAI-compatible tools to Ollama:
-
-```bash
-eval "$(scout env)"
-```
-
-### 3. Desktop launcher (optional)
-
-- `~/Desktop/Scout-Crew.desktop`
-- `~/.local/share/applications/scout-crew.desktop`
-
-If the icon is blocked: right-click → **Allow Launching**, or run `scout-gui`.
-
-### 4. What setup installs
-
-```
-User / GUI / CLI
-      │
-      ▼
-PROMPT SYNTAX v1  (ADMIN-PRIVILEGED USER QUERY)
-      │
-      ├─ scout chat | scout dev  → single local role model
-      │
-      └─ scout crew (sequential)
-            alert → intel → vet → rank → core
-            → dev (admin) → manager synthesis (admin)
-```
-
-| Concern | Module / behavior |
-|---------|-------------------|
-| Local-only LLMs | `local_llms.py`, CLI/GUI env hard-pin |
-| Anti-recursion | sequential process, `planning=False`, `memory=False`, DAG check |
-| Admin user prompts | `prompt_syntax.py`, `admin_policy.py` |
-| AZ alpha scope | `arizona_phase.py`, `config/arizona_phase.json` |
-| Traces | `CREWAI_TRACING_ENABLED=true` (models still local) |
-
-More detail: [SETUP.md](SETUP.md).
+Until an explicit **second deployment phase** prompt:
+- `phase_class = alpha_development`, `deployment_phase = 1`
+- All pipelines/catalogs scoped to **AZ only**
+- Scanner/hazard/ranking **essential inside AZ**
+- Location marker filters set on the AZ shard (~23 filters: I-10, I-17, US-60, mile markers, etc.)
+- Manager persona locked to alpha; refuses to self-promote
 
 ---
 
-## Verification
+## Unique Functions & Scripts
 
-Run these in order after setup. All LLM calls must stay on `127.0.0.1:11434`.
+### 1. Local-Only LLM Routing (`src/scout_crew/local_llms.py`)
 
-### Step A — Health and roster
+**Zero-cloud enforcement** with multi-host (mesh) support:
 
-```bash
-scout status
-# expect: ollama_up true, external_token_usage false, weight_lineage qwen3, role_uses_llama {}
-
-scout roster
-# expect role → model map (manager/hermes-hc, dev/scout-dev, …)
-
-scout models
-# expect scout-* and qwen3:8b tags
+```python
+# Core functions
+make_llm(role, temperature, max_tokens)      # CrewAI LLM bound to role's Ollama host
+resolve_role_model(role, installed, host)    # Picks best installed model from preference list
+resolve_role_host(role)                      # Returns Ollama base URL (local or Tailscale peer)
+model_roster()                               # {role: resolved_model} map
+role_endpoints()                             # {role: {host, model, openai_base}} map
+status()                                     # Full diagnostics: ollama_up, external_token_usage=False, weight_lineage="qwen3"
+assert_local_only()                          # Fails fast if cloud keys/URLs detected
 ```
 
-### Step B — Single-model chat (prompt syntax v1)
+**Key features:**
+- Per-role Ollama host overrides via `OLLAMA_HOST_*` env vars (mesh: Linux specialists + Windows Hermes)
+- Preference lists with Qwen3 fallbacks — **never falls back to Llama** (Meta license)
+- `SCOUT_PEER_OLLAMA_OPENAI` convenience for Windows Tailscale peer
+- Cached `/api/tags` queries with `force_refresh`
+- Dummy key `OPENAI_API_KEY=ollama` for OpenAI-compatible clients
 
-```bash
-scout chat -m manager -p "Reply with exactly: PROMPT_OK" -v
+### 2. PROMPT SYNTAX v1 Envelope (`src/scout_crew/prompt_syntax.py`)
+
+**Canonical prompt format** applied idempotently across CLI, GUI, and crew:
+
+```
+=== PROMPT SYNTAX v1 ===
+role: manager
+rules:
+- Answer === USER QUERY === fully (highest priority; ADMIN-PRIVILEGED).
+- Do not ignore the user query; admin agents need no approval to act on it.
+- If task context exists, retain it and finish any required deliverable after the user answer.
+
+=== USER QUERY (ADMIN-PRIVILEGED) ===
+privilege: admin
+priority: 1
+source: cli-crew
+<operator's raw text>
+=== END USER QUERY ===
+
+=== TASK MODE ===
+DEBUG
+
+=== ROLE HINT ===
+Answer the operator; if a brief is implied, complete it after the answer.
+
+=== TASK CONTEXT (retain; do not drop) ===
+<specialist outputs, transcript, etc.>
+=== END TASK CONTEXT ===
+
+=== USER QUERY REMINDER (ADMIN-PRIVILEGED, still priority 1) ===
+<operator's raw text repeated>
 ```
 
-**Pass criteria**
-- stdout contains `PROMPT_OK` (or a clear manager answer)
-- stderr JSON includes `"prompt_syntax": "v1"`, `"envelope": true`
-- `"base_url"` is `http://127.0.0.1:11434/v1`
-- `"external_token_usage": false`
-
-### Step C — scout-dev task mode (GUI Dev path)
-
-```bash
-scout dev --task-mode DEBUG -p "Reply with exactly: MODE_DEBUG_OK" -v
+**Key functions:**
+```python
+build_user_envelope(user_text, role, task_mode, task_context, source)  # Idempotent wrapper
+convert_user_prompt(user_text, role, task_mode, task_context, source)  # Canonical converter
+build_chat_messages(user_text, role, system_override, task_mode, task_context, source)  # Returns (system, user)
+extract_raw_user_query(text)  # Peels v1/admin-banner/legacy → raw operator text
+is_prompt_syntax_v1(text)     # Detects already-enveloped text
+normalize_role(spec)          # "mgr"→"manager", "scout-dev"→"dev", bare model→"custom"
+system_for_role(role, override)  # Role-specific system prompts with alpha/AZ lock baked in
 ```
 
-**Pass criteria**
-- exit code 0, non-empty reply
-- stderr: `"role": "dev"`, `"task_mode": "DEBUG"`, `"prompt_syntax": "v1"`
+### 3. Arizona Phase Engine (`src/scout_crew/arizona_phase.py`)
 
-Optional full mode matrix (DEBUG → REFACTOR): see committed summary  
-`output/verification/dev_mode_suite/summary.json` (7/7 PASS on last smoke).
+**Jurisdiction scope application** across map shards, catalogs, and stack env:
 
-### Step D — Full multi-agent crew (sample task)
-
-**Option 1 — committed integration inputs (recommended replay)**
-
-```bash
-scout crew -v --inputs output/verification/crew_integration/inputs.json
+```python
+load_phase_config()                           # Reads config/arizona_phase.json
+location_marker_filters(cfg)                  # Returns ~23 AZ filters (deduped)
+ensure_az_shard_dirs(cfg)                     # Creates vlm_text_map_shards/AZ + stamp file
+apply_location_marker_filters(cfg)            # Writes location_marker_filters.json to each AZ shard
+apply_catalog_scope(cfg)                      # Points active Broadcastify catalog at AZ shard; writes jurisdiction_scope.active.json
+apply_vehicle_stack_env(cfg)                  # Rewrites ~/Desktop/stack/config/vehicle_stack.env to AZ selector
+apply_all_pipeline_scope()                    # Runs all above; writes output/az_manager_status.json
+manager_status_payload(cfg, ...)              # Rich status dict for manager context
+detect_phase_transition(text)                 # Scans operator prompt for "second deployment phase" triggers
+alpha_persona_block(user_prompt)              # Manager persona lock text
+manager_phase_prompt_block(user_prompt)       # Full jurisdiction scope block injected into manager task
+export_environ()                              # Env vars child pipelines inherit (JURISDICTION_STATE=AZ, etc.)
 ```
 
-**Option 2 — defaults (AZ alpha built-ins)**
+**Default AZ markers:** `mile marker`, `exit`, `northbound`, `I-10`, `I-17`, `I-19`, `I-40`, `I-8`, `US-60`, `US-93`, `SR-51`, `SR-101`, `SR-202`, `junction`, `mp`, `milepost`, `on-ramp`, `off-ramp`, `shoulder`, `highway`
 
-```bash
-scout crew -v
+### 4. Admin Policy & Anti-Recursion Guards (`src/scout_crew/admin_policy.py`)
+
+**Formalizes "admin" without CrewAI RBAC:**
+
+```python
+ADMIN_AGENT_KEYS = {"local_manager", "dev_specialist"}
+SPECIALIST_AGENT_KEYS = {"alert_specialist", "intel_specialist", "vet_specialist", "rank_specialist", "core_specialist"}
+
+ADMIN_MAX_ITER = 10, ADMIN_MAX_RETRY = 1
+SPECIALIST_MAX_ITER = 4, SPECIALIST_MAX_RETRY = 1
+
+agent_runtime_kwargs(agent_key)  # Returns {allow_delegation: False, max_iter, max_retry_limit, respect_context_window: True, cache: True}
+validate_task_context_dag(tasks_config)  # Raises on cycles (recursion risk)
+validate_admin_partition(agent_keys)     # Ensures no admin/specialist overlap or unknown keys
 ```
 
-**Option 3 — ad-hoc sample inputs**
+**Admin authority rules (injected into agent backstories):**
+- Operate at admin level; no manager approval needed for own task
+- User prompts are **ADMIN-PRIVILEGED** — outrank boilerplate synthesis
+- Priority: (A) answer user first, (B) retain task context, (C) finish deliverable
+- Specialists remain non-admin; execute bound task only
 
-```bash
-mkdir -p output/sample_verify
-cat > output/sample_verify/inputs.json <<'EOF'
-{
-  "transcript": "Unit 7 Phoenix PD, vehicle stop on US-60 eastbound near Rural Rd, radar check complete, subject cooperative.",
-  "dev_mode": "PROCESS",
-  "dev_request": "Sample verify: one-line note that AZ alpha scope is held.",
-  "user_prompt": "Sample task: reply first with SAMPLE_CREW_OK, confirm alpha_development and AZ active, then finish the brief.",
-  "user_prompt_raw": "Sample task: reply first with SAMPLE_CREW_OK, confirm alpha_development and AZ active, then finish the brief.",
-  "user_prompt_privilege": "admin"
-}
-EOF
-scout crew -v --inputs output/sample_verify/inputs.json
+### 5. Multi-Machine Blackboard Tools (`src/scout_crew/tools/blackboard_tool.py`)
+
+**Categorized shared memory** with role-based ACL:
+
+```python
+# Categories: "pipeline" (specialist outputs, manager summaries) | "dev_debug" (dev-only)
+# Kinds: "raw" (specialists) | "summary" (manager) | "rewrite" (manager)
+
+BlackboardWriteTool(role)   # category, title, body, kind, tags, supersede_id
+BlackboardReadTool(role)    # category, limit, kind, query, tag
+BlackboardSnapshotTool(role) # limit_per_category
+
+tools_for_role(role)  # Returns permitted tool instances:
+  # hermes → read + snapshot only
+  # manager → read + snapshot + write(pipeline, kind=summary|rewrite)
+  # dev → read + snapshot + write(dev_debug)
+  # specialists → read + snapshot + write(pipeline, kind=raw)
+  # operator → read + snapshot
 ```
 
-**Pass criteria (manager final brief)**
+**Server:** `src/scout_crew/blackboard/server.py` (HTTP on `:8765`), client in `src/scout_crew/blackboard/client.py`.
 
-| Check | Expected |
-|-------|----------|
-| Exit code | `0` |
-| Local roster on stderr | includes `scout-dev`, `qwen3:8b`, other scout tags |
-| No cloud host | no `api.openai.com` in logs |
-| User prompt honored | e.g. `SAMPLE_CREW_OK` / `CREW_INTEGRATION_OK` in `user_response` |
-| Admin priority | `user_priority_applied: true`, `user_prompt_admin_privilege: true` |
-| Task context | `task_context_retained: true` |
-| Alpha lock | `phase_class: alpha_development`, `deployment_phase: 1`, `phase_lock_held: true` |
-| AZ scope | `az_manager_status: AZ_JURISDICTION_ACTIVE`, `az_shard: AZ` |
-| Marker filters | non-empty `az_location_marker_filters` (typically ~23) |
-| Pipeline | real `ALERT:…` (not template), `VET_PASS`/`VET_FAIL`, `nav_line` set |
-| Artifacts | `output/az_manager_status.json`, `output/dev_brief.md` written |
-
-Last committed integration snapshots:
-
-- `output/verification/crew_integration/validation.json` — earlier local integration
-- `output/verification/crew_qwen_run/summary.json` — **Qwen3 + mesh roster PASS** (`crew_exit: 0`, no Llama role use)
-- `output/verification/crew_qwen_run/llama_scan.txt` — log/brief Llama scan (clean)
-
-Full setup (mesh, licenses, rebuild): [SETUP.md](SETUP.md).
-
-### Step E — GUI smoke (optional)
+### 6. CLI (`src/scout_crew/cli.py`) — `scout` command
 
 ```bash
-scout-gui
+scout status              # Ollama + role assignment + cloud usage flag
+scout roster              # role → model map
+scout models              # installed local model tags
+scout env                 # Shell exports to route OpenAI clients to Ollama
+scout chat -m ROLE -p "…" # Single local completion (v1 envelope)
+scout dev -p "…"          # Admin shortcut → scout-dev
+scout crew [-v] [--inputs file.json]  # Full sequential crew
+scout blackboard <stats|snapshot|read|write>  # Inspect/write blackboard
 ```
 
-1. Badge: `LOCAL · Ollama up · no cloud tokens`
-2. Main chat limited to **manager** / **core**
-3. Open **Dev Conversations** → send a DEBUG message
-4. Confirm read-only response panel updates
-5. **Run full crew** → live Crew tab + `output/gui_inputs.json`
+**Key behaviors:**
+- Hard-locals env before any imports (`OPENAI_BASE_URL=127.0.0.1:11434/v1`)
+- `assert_local_only()` on every subcommand
+- `chat`/`dev` apply PROMPT SYNTAX v1 + role-specific system prompt
+- `crew` injects `arizona_phase_block`, `phase_transition`, `location_context` into inputs
+- Writes `output/az_manager_status.json` on every crew run
+
+### 7. Desktop GUI (`src/scout_crew/gui.py`) — `scout-gui`
+
+**PySide6 control plane** with integrated terminal:
+
+| Tab | Purpose |
+|-----|---------|
+| **Hermes** | Project Director chat (admin, read-only blackboard, MODE selector) |
+| **Crew output** | Live crew process stdout/stderr + artifact tails |
+| **Chat output** | Admin/core chat stdout/stderr |
+| **Blackboard** | Live server stats + hermes-read-only snapshot (4s refresh) |
+| **Pipeline** | Pipeline category entries + artifact tails (5s refresh) |
+| **Terminal** | Interactive bash with forced local LLM env |
+
+**Main window (left pane):**
+- Status badge: `LOCAL · Ollama up · no cloud tokens`
+- CrewAI pipeline controls: dev_mode, dev_request, **Manager prompt (admin priority)**
+- Admin/Core chat: limited to `manager`, `core`, `hermes` roles
+- **Dev Conversations** button → dedicated `scout-dev` window (full task modes: DEBUG/PROCESS/REVIEW/IMPLEMENT/TEST/DOCS/REFACTOR)
+
+**Dev Conversations window:** Persistent history, task-mode selector, task-context auto-retention, raw prompt files written to `output/gui_dev_prompt.txt` + `output/gui_dev_task_context.txt`.
+
+### 8. Crew Definition (`src/scout_crew/crew.py`)
+
+**Sequential, loop-safe crew** with explicit task→agent bindings:
+
+```python
+@CrewBase
+class ScoutCrew:
+    agents_config = "config/agents.yaml"
+    tasks_config = "config/tasks.yaml"
+
+    # 7 agents: 2 admin (local_manager, dev_specialist) + 5 specialists
+    # Each built via _build_agent(key, role_llm, temperature, max_tokens)
+    #   - Injects admin_policy rules into backstory
+    #   - Binds blackboard tools via tools_for_role(key)
+    #   - Uses make_llm() for local Ollama routing
+
+    @crew
+    def crew(self) -> Crew:
+        assert_local_only()
+        validate_task_context_dag(raw_tasks_yaml)  # Fail fast on cycles
+        validate_admin_partition(all_agent_keys)
+        return Crew(
+            agents=roster,  # Explicit order: manager, dev, alert, intel, vet, rank, core
+            tasks=self.tasks,
+            process=Process.sequential,
+            memory=False,
+            cache=True,
+            planning=False,      # No hierarchical re-planning loops
+            max_rpm=30,
+        )
+```
+
+**Pipeline order (fixed):**
+1. `alert_task` → `alert_specialist` (scout-alert)
+2. `intel_task` → `intel_specialist` (scout-intel)
+3. `vet_task` → `vet_specialist` (scout-vet) *context: alert_task*
+4. `rank_task` → `rank_specialist` (scout-rank)
+5. `core_task` → `core_specialist` (scout-core) *context: alert,intel,vet,rank*
+6. `dev_task` → `dev_specialist` (scout-dev, **admin**) *context: all above*
+7. `manager_synthesis_task` → `local_manager` (scout-hermes-hc, **admin**) *context: all above*
+
+### 9. Verification Suite (`output/verification/`)
+
+**Committed smoke/integration proofs:**
+
+| Path | Proves |
+|------|--------|
+| `index.json` | Suite index |
+| `crew_integration/validation.json` | Full multi-agent crew PASS |
+| `crew_integration/inputs.json` | Replay inputs for `scout crew` |
+| `crew_integration/parsed_brief.json` | Manager brief structure |
+| `crew_integration/dev_brief.md` | Dev output |
+| `crew_integration/az_manager_status.json` | AZ scope status |
+| `dev_mode_suite/summary.json` | scout-dev modes DEBUG→REFACTOR (7/7 PASS) |
+| `prompt_e2e/crew_path_check.json` | Idempotent prompt envelope paths |
+| `crew_qwen_run/summary.json` | **Qwen3 + mesh roster PASS** (`crew_exit: 0`, no Llama role use) |
+| `crew_qwen_run/llama_scan.txt` | Log/brief Llama scan (clean) |
 
 ---
 
-## Quick start (after verification)
+## Quick Start (after verification)
 
 ```bash
 scout status && scout roster
@@ -280,6 +319,8 @@ scout crew -v
 scout-gui
 eval "$(scout env)"
 ```
+
+---
 
 ### CLI cheat sheet
 
@@ -298,107 +339,30 @@ eval "$(scout env)"
 
 ---
 
-## Pipeline order
+## Architecture Summary
 
-1. `alert_task` → scout-alert  
-2. `intel_task` → scout-intel  
-3. `vet_task` → scout-vet  
-4. `rank_task` → scout-rank  
-5. `core_task` → scout-core  
-6. `dev_task` → scout-dev **(admin)**  
-7. `manager_synthesis_task` → scout-hermes-hc **(admin final brief)**  
-
-User prompts are **admin-privileged**: answer first, retain task context, finish deliverable (no drop-through).
-
----
-
-## Prompt syntax v1
-
-Every chat/dev/crew user prompt is converted to a canonical envelope:
-
-- `=== PROMPT SYNTAX v1 ===`
-- `=== USER QUERY (ADMIN-PRIVILEGED) ===` … `=== END USER QUERY ===`
-- optional `TASK MODE` / `TASK CONTEXT`
-- trailing reminder for small local models
-
-Conversion is **idempotent** (raw, legacy admin banner, or already-v1 input peels cleanly). GUI writes raw text to `output/gui_*_prompt.txt`; CLI applies the envelope once.
+| Concern | Module / Behavior |
+|---------|-------------------|
+| Local-only LLMs | `local_llms.py`, CLI/GUI env hard-pin, `assert_local_only()` |
+| Anti-recursion | Sequential process, `planning=False`, `memory=False`, DAG check, `allow_delegation=False` |
+| Admin user prompts | `prompt_syntax.py`, `admin_policy.py` (ADMIN-PRIVILEGED, answer first, retain context, finish) |
+| AZ alpha scope | `arizona_phase.py`, `config/arizona_phase.json` |
+| Traces | `CREWAI_TRACING_ENABLED=true` (models still local) |
+| Shared memory | Blackboard HTTP server (`:8765`) + CrewAI tools with role ACL |
+| GUI | PySide6 tabs (Hermes, Crew, Chat, Blackboard, Pipeline, Terminal) + Dev Conversations window |
 
 ---
 
-## Alpha phase (Arizona)
+## Safety / Local-Only
 
-Until an explicit **second deployment phase** prompt:
-
-- `phase_class=alpha_development`, `deployment_phase=1`
-- All pipelines/catalogs scoped to **AZ only**
-- Scanner/hazard/ranking **essential inside AZ**
-- Location marker filters set on the AZ shard
-
-Module: `src/scout_crew/arizona_phase.py`.
+- Keep `OPENAI_BASE_URL` / `OPENAI_API_BASE` on `127.0.0.1:11434`
+- Dummy key `OPENAI_API_KEY=ollama` is intentional
+- `assert_local_only()` refuses common cloud provider env keys
+- Do not commit real API keys (`.env` is gitignored)
+- Trace links may include prompts — treat as sensitive
 
 ---
 
-## Outputs
-
-| Path | Producer |
-|------|----------|
-| `output/local_brief.json` | manager synthesis (when written) |
-| `output/dev_brief.md` | scout-dev |
-| `output/az_manager_status.json` | AZ scope apply status |
-| `output/gui_inputs.json` | GUI crew run |
-| `output/gui_*_prompt.txt` | raw GUI prompts (CLI envelopes them) |
-| `output/verification/` | committed smoke/integration summaries |
-
-Runtime `output/*` is gitignored except `.gitkeep` and `output/verification/**`.
-
-### Verification artifacts (committed)
-
-| Path | Proves |
-|------|--------|
-| `output/verification/index.json` | suite index |
-| `output/verification/crew_integration/validation.json` | full multi-agent crew PASS |
-| `output/verification/crew_integration/inputs.json` | replay inputs for `scout crew` |
-| `output/verification/dev_mode_suite/summary.json` | scout-dev modes DEBUG…REFACTOR |
-| `output/verification/prompt_e2e/crew_path_check.json` | idempotent prompt envelope paths |
-
----
-
-## Architecture (short)
-
-- **Process:** sequential (not hierarchical) — avoids manager re-query loops  
-- **Admins:** `local_manager`, `dev_specialist` — no mutual approval; delegation off (prevents tool-JSON loops on local llama)  
-- **Specialists:** no delegation; tight `max_iter`  
-- **Guards:** `assert_local_only()`, acyclic task DAG, `planning=False`, `memory=False`  
-- **Key modules:** `local_llms.py`, `admin_policy.py`, `prompt_syntax.py`, `arizona_phase.py`, `crew.py`, `cli.py`, `gui.py`
-
----
-
-## Troubleshooting (setup / verify)
-
-| Symptom | Fix |
-|---------|-----|
-| `Ollama is unreachable` | `ollama serve`; `curl -s http://127.0.0.1:11434/api/tags` |
-| Missing model tag | `ollama list`; rebuild Modelfile; check `OLLAMA_MODEL_*` in `.env` |
-| Cloud key refused | unset provider keys; restore `.env` from `.env.example` |
-| `scout: missing venv` | `cd ~/Desktop/scout_crew && crewai install` |
-| Crew slow | normal on CPU; first call loads model weights |
-| Manager tool-shaped JSON | admins have delegation disabled; use sequential `scout crew` only |
-| GUI won’t start | run `scout-gui` from a desktop session; check `DISPLAY` |
-
-More: [USAGE.md](USAGE.md) § Troubleshooting, [SETUP.md](SETUP.md) § Troubleshooting setup.
-
----
-
-## Safety / local-only
-
-- Keep `OPENAI_BASE_URL` / `OPENAI_API_BASE` on `127.0.0.1:11434`  
-- Dummy key `OPENAI_API_KEY=ollama` is intentional  
-- `assert_local_only()` refuses common cloud provider env keys  
-- Do not commit real API keys (`.env` is gitignored)  
-- Trace links may include prompts — treat as sensitive  
-
----
-
-## License / notes
+## License / Notes
 
 Project scaffold originated from CrewAI classic template; Scout-specific agents, local routing, CLI, GUI, AZ phase, and prompt syntax are project code. CrewAI remains subject to its own license.
