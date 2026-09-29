@@ -575,6 +575,8 @@ class HermesConversationPane(QWidget):
             "scout-hermes-hc1.1.0",
             "manager",
             "core",
+            "pa",
+            "assistant",
         ])
         self.model.setCurrentText("hermes")
         meta.addWidget(self.model)
@@ -1112,9 +1114,9 @@ class ScoutMainWindow(QMainWindow):
         chat_box = QGroupBox("Admin / Core chat")
         chf = QFormLayout(chat_box)
         self.chat_model = QComboBox()
-        self.chat_model.addItems(["manager", "core", "hermes", "scout-hermes-hc1.0.0"])
+        self.chat_model.addItems(["manager", "core", "hermes", "scout-hermes-hc1.0.0", "pa", "assistant"])
         self.chat_model.setToolTip(
-            "Main chat: manager/core/hermes. Dev Conversations = scout-dev. Hermes tab = Project Director + classic GUI."
+            "Main chat: manager/core/hermes/pa (personal assistant). Dev Conversations = scout-dev. Hermes tab = Project Director + classic GUI."
         )
         self.chat_prompt = QTextEdit()
         self.chat_prompt.setFixedHeight(70)
