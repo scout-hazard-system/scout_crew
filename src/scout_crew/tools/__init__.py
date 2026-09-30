@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Role-scoped tool composition: blackboard + read-only map tools."""
+"""Role-scoped tool composition: blackboard + read-only map tools + orchestrated specialists."""
 
 from scout_crew.tools.blackboard_tool import tools_for_role as _blackboard_tools_for_role
 from scout_crew.tools.map_tool import map_tools_for_role
+from scout_crew.tools.specialist_tools import specialist_tools_for_orchestration
 
 
 def tools_for_role(role: str) -> list:
@@ -23,4 +24,9 @@ def tools_for_role(role: str) -> list:
     return _blackboard_tools_for_role(role) + map_tools_for_role(role)
 
 
-__all__ = ["tools_for_role"]
+def orchestrated_manager_tools() -> list:
+    """Manager tools in orchestrated mode: blackboard + map + per-specialist tools."""
+    return tools_for_role("manager") + specialist_tools_for_orchestration()
+
+
+__all__ = ["orchestrated_manager_tools", "specialist_tools_for_orchestration", "tools_for_role"]

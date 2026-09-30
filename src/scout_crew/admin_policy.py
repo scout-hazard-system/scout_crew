@@ -53,7 +53,7 @@ ANTI-RECURSION / NO QUERY-LOOP RULES (mandatory):
 1. Return one final answer that both serves the user query (if any) and completes the assigned task. Do not reopen finished specialist work.
 2. Never ask another agent to redo a task that already produced output in context.
 3. Never delegate to Local Scout Crew Manager or Scout Development admin peers.
-4. Do not delegate and do not invent tool schemas. You MAY use blackboard_read / blackboard_write / blackboard_snapshot tools only. Answer the assigned task from context + blackboard.
+4. Do not delegate and do not invent tool schemas. You MAY use blackboard_read / blackboard_write / blackboard_snapshot and the map_* read-only tools only. Answer the assigned task from context + blackboard + map state.
 5. Do not emit self-referential instructions ("ask scout-dev again", "loop until", "re-run manager").
 6. If blocked by missing data, state the gap and stop — do not invent follow-up agent calls.
 7. Prefer facts already present in prior task context. Keep that context available through task completion; do not clear it after answering the user.

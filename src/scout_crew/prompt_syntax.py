@@ -32,6 +32,8 @@ CHAT_ROLES = (
     "vet",
     "rank",
     "base",
+    "pa",
+    "hermes",
 )
 
 ROLE_ALIASES = {
@@ -48,8 +50,10 @@ ROLE_ALIASES = {
     "vet": "vet",
     "rank": "rank",
     "base": "base",
-    "llama": "base",
-    "llama3.1": "base",
+    "pa": "pa",
+    "assistant": "pa",
+    "personal": "pa",
+    "hermes": "hermes",
 }
 
 ROLE_SYSTEM_PROMPTS: Dict[str, str] = {
@@ -101,10 +105,28 @@ ROLE_SYSTEM_PROMPTS: Dict[str, str] = {
         "- For channel ranking requests, return compact ranking JSON; otherwise answer directly."
     ),
     "base": (
-        "You are a local Ollama assistant (llama base).\n"
+        "You are a local Ollama assistant (qwen3 base).\n"
         "PROMPT SYNTAX:\n"
         "- === USER QUERY === is mandatory — answer it fully.\n"
         "- No cloud APIs. No tool-call envelopes unless asked."
+    ),
+    "pa": (
+        "You are Scout Hermes PA — Personal Assistant with full local Scout tool access.\n"
+        "PROMPT SYNTAX:\n"
+        "- === USER QUERY === is mandatory — answer it fully (admin-privileged).\n"
+        "- Optional === TASK MODE === guides format (ASSISTANT/MANAGER/DEV/ALERT/INTEL/VET/RANK/NAV/CHAT/CORE/PIPELINE).\n"
+        "- You have access to blackboard_read, blackboard_write, blackboard_snapshot tools.\n"
+        "- All LLM traffic routes through local Ollama only. No cloud APIs.\n"
+        "- Default mode: ASSISTANT (general personal assistant)."
+    ),
+    "hermes": (
+        "You are Scout Hermes HC — Project Director for the local Scout stack.\n"
+        "PROMPT SYNTAX:\n"
+        "- === USER QUERY === is mandatory — answer it fully (admin-privileged).\n"
+        "- Optional === TASK MODE === guides format (MANAGER/DEV/CORE/ALERT/INTEL/VET/RANK/NAV/CHAT/PIPELINE).\n"
+        "- You have access to blackboard_read, blackboard_snapshot tools (read-only).\n"
+        "- All LLM traffic routes through local Ollama only. No cloud APIs.\n"
+        "- Default mode: MANAGER (ops/AZ coordination)."
     ),
     "custom": (
         "You are a local Ollama model.\n"
@@ -124,6 +146,8 @@ ROLE_TASK_HINTS: Dict[str, str] = {
     "vet": "Use VET_PASS/VET_FAIL when vetting a proposed alert.",
     "rank": "Use ranking JSON when scoring channel candidates.",
     "base": "Answer helpfully and directly.",
+    "pa": "Default ASSISTANT mode: answer helpfully. Use MODE: for Scout ops (MANAGER/DEV/ALERT/INTEL/VET/RANK/NAV/CHAT/CORE/PIPELINE). Tools: blackboard_read/write/snapshot.",
+    "hermes": "Default MANAGER mode: coordinate ops. Use MODE: for Scout ops. Tools: blackboard_read/snapshot (read-only).",
     "custom": "Answer helpfully and directly.",
 }
 

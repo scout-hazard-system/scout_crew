@@ -55,6 +55,7 @@ ROLE_ACL: Dict[str, Dict[str, Sequence[str]]] = {
             "manager",
             "dev",
             "hermes",
+            "pa",
             "operator",
         ),
         "write": ("alert", "intel", "vet", "rank", "core"),
@@ -62,9 +63,9 @@ ROLE_ACL: Dict[str, Dict[str, Sequence[str]]] = {
         "summarize": ("manager",),
     },
     "dev_debug": {
-        "read": ("dev", "manager", "hermes", "operator"),
-        "write": ("dev",),
-        "summarize": ("dev",),  # dev may rewrite own debug notes
+        "read": ("dev", "manager", "hermes", "pa", "operator"),
+        "write": ("dev", "pa"),
+        "summarize": ("dev", "pa"),  # dev/pa may rewrite own debug notes
     },
 }
 
@@ -211,6 +212,8 @@ class BlackboardStore:
             "hermes-hc": "hermes",
             "scout-hermes-hc": "hermes",
             "scout-hermes-hc1.0.0": "hermes",
+            "assistant": "pa",
+            "personal": "pa",
         }
         return aliases.get(r, r)
 
