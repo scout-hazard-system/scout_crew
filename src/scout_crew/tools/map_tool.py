@@ -20,7 +20,7 @@ the blackboard or elsewhere. Resolution order:
 
     SCOUT_MAP_BASE_URL
         -> SCOUT_BACKEND_URL
-        -> http://{SCOUT_MESH_HUB_ADDRESS}:18080   (default hub 10.66.2.3)
+        -> http://{SCOUT_MESH_HUB_ADDRESS}:18080   (default hub 10.66.0.1)
 """
 
 from __future__ import annotations
@@ -37,13 +37,10 @@ from pydantic import BaseModel, Field
 
 
 def map_base_url() -> str:
-    """Resolve the map server base URL (no trailing slash)."""
-    for key in ("SCOUT_MAP_BASE_URL", "SCOUT_BACKEND_URL"):
-        value = (os.getenv(key) or "").strip().rstrip("/")
-        if value:
-            return value
-    hub = (os.getenv("SCOUT_MESH_HUB_ADDRESS") or "").strip() or "10.66.2.3"
-    return f"http://{hub}:18080"
+    """Map server base URL (see scout_crew.hosts.map_server_url)."""
+    from scout_crew import hosts
+
+    return hosts.map_server_url()
 
 
 def _auth_headers() -> Dict[str, str]:

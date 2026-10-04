@@ -266,8 +266,11 @@ def cmd_crew(args: argparse.Namespace) -> int:
         }
     )
 
-    Path("output").mkdir(parents=True, exist_ok=True)
-    Path("output/az_manager_status.json").write_text(
+    from scout_crew.hosts import output_dir
+
+    out_dir = output_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "az_manager_status.json").write_text(
         json.dumps(az_status, indent=2) + "\n", encoding="utf-8"
     )
     if args.verbose:

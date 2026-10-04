@@ -16,16 +16,17 @@
 # Quick mesh health: Scout Mesh (WireGuard scoutwg0) + Ollama + blackboard + map server
 # Peer Ollama is reached on its scoutwg0 mesh IP set (10.66.x.x), not LAN.
 set -u
-ROOT="${SCOUT_CREW_ROOT:-$HOME/Desktop/scout_crew}"
+ROOT="${SCOUT_CREW_ROOT:-$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)}"
 if [[ -f "$ROOT/.env" ]]; then
   # shellcheck disable=SC1091
   set -a && source "$ROOT/.env" && set +a
 fi
 
-HUB="${SCOUT_MESH_HUB_ADDRESS:-10.66.2.3}"
+HUB="${SCOUT_MESH_HUB_ADDRESS:-10.66.0.1}"
 IFACE="${SCOUT_MESH_IFACE:-scoutwg0}"
 CIDR="${SCOUT_MESH_CIDR:-10.66.0.0/16}"
 PEER="${SCOUT_PEER_MESH_IP:-}"
+PEER_PORT="${SCOUT_PEER_OLLAMA_PORT:-11434}"
 # The Windows harness is an off-mesh admin host: it has no scoutwg0 peer and no
 # blackboard role, so a missing PEER is normal there (map data flows via Pop!_OS
 # peers). Set SCOUT_PEER_MESH_LAN_IP to verify the peer is NOT answering on LAN.
@@ -64,7 +65,7 @@ echo
 echo -n "ollama hub:       "; curl -sS --connect-timeout 2 "http://${HUB}:11434/api/version" || echo DOWN
 echo
 if [[ -n "$PEER" ]]; then
-  echo -n "ollama mesh peer: "; curl -sS --connect-timeout 2 "http://${PEER}:11434/api/version" || echo DOWN
+  echo -n "ollama mesh peer: "; curl -sS --connect-timeout 2 "http://${PEER}:${PEER_PORT}/api/version" || echo DOWN
   echo
 fi
 echo -n "blackboard hub:   "; curl -sS --connect-timeout 2 "$BB/health" || echo DOWN
@@ -78,7 +79,7 @@ echo "== role endpoints (host-aware) =="
 if command -v uv >/dev/null 2>&1 && [[ -d "$ROOT" ]]; then
   (
     cd "$ROOT" || exit 0
-    export SCOUT_PEER_OLLAMA_OPENAI="${SCOUT_PEER_OLLAMA_OPENAI:-http://${PEER:-$HUB}:11434/v1}"
+    export SCOUT_PEER_OLLAMA_OPENAI="${SCOUT_PEER_OLLAMA_OPENAI:-http://${PEER:-$HUB}:${PEER_PORT}/v1}"
     uv run python -c '
 from scout_crew.local_llms import status
 import json
@@ -103,14 +104,14 @@ fi
 echo
 echo "== lock check =="
 if [[ -n "$PEER" ]]; then
-  if curl -sS --connect-timeout 2 "http://${PEER}:11434/api/version" >/dev/null 2>&1; then
-    echo "PASS: peer Ollama reachable on scoutwg0 ${PEER}:11434"
+  if curl -sS --connect-timeout 2 "http://${PEER}:${PEER_PORT}/api/version" >/dev/null 2>&1; then
+    echo "PASS: peer Ollama reachable on scoutwg0 ${PEER}:${PEER_PORT}"
   else
-    echo "FAIL: peer Ollama NOT reachable on locked mesh IP ${PEER}:11434"
+    echo "FAIL: peer Ollama NOT reachable on locked mesh IP ${PEER}:${PEER_PORT}"
     exit 1
   fi
-  if [[ -n "$PEER_LAN" ]] && curl -sS --connect-timeout 2 "http://${PEER_LAN}:11434/api/version" >/dev/null 2>&1; then
-    echo "WARN: peer Ollama also reachable on LAN ${PEER_LAN}:11434 (mesh-only expected)"
+  if [[ -n "$PEER_LAN" ]] && curl -sS --connect-timeout 2 "http://${PEER_LAN}:${PEER_PORT}/api/version" >/dev/null 2>&1; then
+    echo "WARN: peer Ollama also reachable on LAN ${PEER_LAN}:${PEER_PORT} (mesh-only expected)"
   else
     echo "PASS: LAN peer Ollama closed/unreachable (locked to scoutwg0)"
   fi

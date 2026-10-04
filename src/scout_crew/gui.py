@@ -991,7 +991,9 @@ class PipelineMonitorPane(QWidget):
 
         # artifact tails
         art = []
-        out = _PROJECT_ROOT / "output"
+        from scout_crew.hosts import output_dir
+
+        out = output_dir()
         for name in (
             "local_brief.json",
             "dev_brief.md",

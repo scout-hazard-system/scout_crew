@@ -319,7 +319,9 @@ def mesh_ip_set() -> Dict[str, str]:
     its scoutwg0 mesh address — LAN IPs are expected DOWN for the peer roles.
     All values are env-driven so the real hub/peer addresses live in .env.
     """
-    hub = (os.getenv("SCOUT_MESH_HUB_ADDRESS") or "").strip() or "10.66.2.3"
+    from scout_crew import hosts
+
+    hub = hosts.mesh_hub()
     peer_mesh_ip = (os.getenv("SCOUT_PEER_MESH_IP") or "").strip()
     iface = (os.getenv("SCOUT_MESH_IFACE") or "scoutwg0").strip()
     cidr = (os.getenv("SCOUT_MESH_CIDR") or "10.66.0.0/16").strip()
@@ -330,14 +332,10 @@ def mesh_ip_set() -> Dict[str, str]:
         "hub_address": hub,
         "peer_mesh_ip": peer_mesh_ip or "(unset)",
         "peer_ollama_lock": "mesh_only",
-        "peer_ollama_url": f"http://{peer_mesh_ip}:11434" if peer_mesh_ip else "",
+        "peer_ollama_url": hosts.peer_ollama_url(),
         "self_ollama_url": OLLAMA_HOST,
-        "blackboard_url": (
-            os.getenv("SCOUT_BLACKBOARD_URL") or ""
-        ).strip() or f"http://{hub}:8765",
-        "map_server_url": (
-            os.getenv("SCOUT_MAP_BASE_URL") or ""
-        ).strip() or f"http://{hub}:18080",
+        "blackboard_url": hosts.blackboard_url(),
+        "map_server_url": hosts.map_server_url(),
         "note": (
             "Scout Mesh = WireGuard scoutwg0 (10.66.0.0/16). Hub "
             f"{hub} hosts map server (:18080) + blackboard (:8765). "
