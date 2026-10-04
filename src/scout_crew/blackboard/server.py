@@ -157,7 +157,7 @@ def make_handler(state: ServerState):
 
         def _require_admin(self) -> bool:
             """Master-secret gate (X-Scout-Admin) for issue/revoke."""
-            if not state.secret or self.headers.get("X-Scout-Admin") != state.secret:
+            if not state.secret or not self._secure_eq(self.headers.get("X-Scout-Admin") or "", state.secret):
                 self._reject(401, "admin secret required (X-Scout-Admin)")
                 return False
             return True
@@ -362,6 +362,20 @@ def make_handler(state: ServerState):
     return Handler
 
 
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def _noauth_bind_refused(host: str, secret: str) -> bool:
+    """Fail closed: no token secret + a non-loopback bind would publish an
+    unauthenticated read/write blackboard to the whole LAN/mesh. Allow it only
+    when explicitly requested via SCOUT_BLACKBOARD_ALLOW_NOAUTH=1."""
+    if secret:
+        return False
+    if host.strip().lower() in _LOOPBACK_HOSTS or host.startswith("127."):
+        return False
+    return os.getenv("SCOUT_BLACKBOARD_ALLOW_NOAUTH", "0") not in {"1", "true", "True", "yes"}
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Scout multi-machine blackboard server")
     p.add_argument("--host", default=os.getenv("SCOUT_BLACKBOARD_HOST", "0.0.0.0"))
@@ -381,6 +395,13 @@ def main(argv: list[str] | None = None) -> int:
         help="CSV roles allowed to write raw pipeline entries (default: alert via ACL)",
     )
     args = p.parse_args(argv)
+    if _noauth_bind_refused(args.host, args.secret):
+        print(
+            f"scout blackboard: refusing to listen on {args.host} without SCOUT_BLACKBOARD_TOKEN_SECRET "
+            "(every client could read and write). Set the secret, bind --host 127.0.0.1, or set "
+            "SCOUT_BLACKBOARD_ALLOW_NOAUTH=1 to accept an unauthenticated network blackboard."
+        )
+        return 2
     db = Path(args.db).expanduser() if args.db else None
     sandbox_writers = None
     if args.sandbox_writers.strip():

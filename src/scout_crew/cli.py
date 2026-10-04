@@ -30,6 +30,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from dotenv import load_dotenv
 
+from scout_crew.reasoning import strip_reasoning
+
 # Project root (.env lives here)
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(_PROJECT_ROOT / ".env")
@@ -186,7 +188,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
         out = llm.call(message)
     except Exception as exc:  # noqa: BLE001
         _die(f"local model call failed: {exc}")
-    text = out if isinstance(out, str) else str(out)
+    text = strip_reasoning(out if isinstance(out, str) else str(out))
     print(text)
     return 0
 
