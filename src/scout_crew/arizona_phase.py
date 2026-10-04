@@ -31,7 +31,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 _CONFIG_PATH = Path(__file__).resolve().parent / "config" / "arizona_phase.json"
-_DESKTOP = Path("/home/gibi/Desktop")
+# Root holding vlm_text_map_shards*/ and stack/config/. Was hardcoded to one
+# developer desktop; SCOUT_DATA_ROOT overrides (agent boxes use a data dir).
+_DESKTOP = Path(os.getenv("SCOUT_DATA_ROOT") or (Path.home() / "Desktop")).expanduser()
 
 DEFAULT_AZ_MARKERS: List[str] = [
     "mile marker", "exit", "northbound", "southbound", "eastbound", "westbound",
@@ -54,7 +56,10 @@ DEFAULT_SELECTOR = {
 
 def load_phase_config() -> Dict[str, Any]:
     if _CONFIG_PATH.exists():
-        return json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+        # Paths in the JSON are written as ${SCOUT_DATA_ROOT}/... so the same
+        # config works on any host.
+        raw = _CONFIG_PATH.read_text(encoding="utf-8")
+        return json.loads(raw.replace("${SCOUT_DATA_ROOT}", _DESKTOP.as_posix()))
     return {
         "phase": "alpha_arizona_jurisdiction",
         "target_jurisdiction": {"state": "AZ", "state_name": "Arizona", "lock_state": True},
