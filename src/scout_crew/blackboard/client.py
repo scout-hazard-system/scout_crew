@@ -46,6 +46,7 @@ class BlackboardClient:
     ) -> None:
         self.base_url = (base_url or os.getenv("SCOUT_BLACKBOARD_URL", "")).rstrip("/")
         self.timeout = timeout
+        self._explicit_token = token or ""
         self.token = token or os.getenv("SCOUT_BLACKBOARD_TOKEN", "") or ""
         self._local: Optional[BlackboardStore] = None
         if not self.base_url:
@@ -55,12 +56,24 @@ class BlackboardClient:
     def mode(self) -> str:
         return "remote" if self.base_url else "local"
 
-    def _http(self, method: str, path: str, payload: Optional[dict] = None, *, headers: Optional[Dict[str, str]] = None) -> Any:
+    def _token_for(self, role: Optional[str]) -> str:
+        """Per-role token (SCOUT_BLACKBOARD_TOKEN_<ROLE>) so each agent writes
+        with its own role-bound credential; generic token as fallback."""
+        if self._explicit_token:
+            return self._explicit_token
+        if role:
+            per_role = os.getenv(f"SCOUT_BLACKBOARD_TOKEN_{str(role).strip().upper()}", "").strip()
+            if per_role:
+                return per_role
+        return self.token
+
+    def _http(self, method: str, path: str, payload: Optional[dict] = None, *, headers: Optional[Dict[str, str]] = None, role: Optional[str] = None) -> Any:
         url = f"{self.base_url}{path}"
         data = None
         req_headers = {"Accept": "application/json"}
-        if self.token:
-            req_headers["Authorization"] = f"Bearer {self.token}"
+        token = self._token_for(role)
+        if token:
+            req_headers["Authorization"] = f"Bearer {token}"
         if headers:
             req_headers.update(headers)
         if payload is not None:
@@ -78,19 +91,19 @@ class BlackboardClient:
     def write(self, **kwargs: Any) -> Dict[str, Any]:
         if self._local:
             return self._local.write(**kwargs).to_dict()
-        return self._http("POST", "/v1/write", kwargs)
+        return self._http("POST", "/v1/write", kwargs, role=kwargs.get("role"))
 
     def read(self, **kwargs: Any) -> List[Dict[str, Any]]:
         if self._local:
             return [e.to_dict() for e in self._local.read(**kwargs)]
         q = urllib.parse.urlencode({k: v for k, v in kwargs.items() if v is not None})
-        return self._http("GET", f"/v1/read?{q}")
+        return self._http("GET", f"/v1/read?{q}", role=kwargs.get("role"))
 
     def snapshot(self, **kwargs: Any) -> Dict[str, Any]:
         if self._local:
             return self._local.snapshot(**kwargs)
         q = urllib.parse.urlencode({k: v for k, v in kwargs.items() if v is not None})
-        return self._http("GET", f"/v1/snapshot?{q}")
+        return self._http("GET", f"/v1/snapshot?{q}", role=kwargs.get("role"))
 
     def stats(self) -> Dict[str, Any]:
         if self._local:

@@ -46,11 +46,29 @@ def map_base_url() -> str:
     return f"http://{hub}:18080"
 
 
+def _auth_headers() -> Dict[str, str]:
+    """Device-bound subscription credentials for the map server paywall.
+
+    SCOUT_SUBSCRIPTION_TOKEN is issued per device by the backend admin
+    (/api/admin/subscription/issue); mesh transport alone is not entitlement.
+    """
+    headers: Dict[str, str] = {}
+    token = (os.getenv("SCOUT_SUBSCRIPTION_TOKEN") or "").strip()
+    if token:
+        header = (os.getenv("SCOUT_SUBSCRIPTION_HEADER") or "X-Scout-Subscription").strip()
+        headers[header] = token
+        device = (os.getenv("SCOUT_DEVICE_ID") or "").strip()
+        if device:
+            headers["X-Scout-Device-Id"] = device
+    return headers
+
+
 def _get(path: str, *, timeout: float = 10.0, max_body: int = 4000) -> Dict[str, Any]:
     """Read-only GET against the map server; always returns a JSON dict."""
     url = f"{map_base_url()}{path}"
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        req = urllib.request.Request(url, headers=_auth_headers())
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read().decode("utf-8", errors="replace")
         return {
             "ok": True,
