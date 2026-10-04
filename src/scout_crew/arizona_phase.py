@@ -33,7 +33,9 @@ from typing import Any, Dict, List, Optional
 _CONFIG_PATH = Path(__file__).resolve().parent / "config" / "arizona_phase.json"
 # Root holding vlm_text_map_shards*/ and stack/config/. Was hardcoded to one
 # developer desktop; SCOUT_DATA_ROOT overrides (agent boxes use a data dir).
-_DESKTOP = Path(os.getenv("SCOUT_DATA_ROOT") or (Path.home() / "Desktop")).expanduser()
+from scout_crew.hosts import data_root as _data_root
+
+_DESKTOP = _data_root()
 
 DEFAULT_AZ_MARKERS: List[str] = [
     "mile marker", "exit", "northbound", "southbound", "eastbound", "westbound",
@@ -52,6 +54,39 @@ DEFAULT_SELECTOR = {
     "lock_state": True,
     "desired_types": ["law", "dispatch"],
 }
+
+
+def _az_map_cache_source() -> str:
+    local = Path.home() / ".scanner_stream" / "map_cache" / "shards" / "AZ"
+    if local.is_dir():
+        return str(local)
+    from scout_crew.hosts import map_server_url
+
+    return f"{map_server_url()}/api/map/status#shards[AZ]"
+
+
+def _az_map_cache_tiles() -> int:
+    """AZ planet tiles cached by the map server.
+
+    The cache belongs to the map server's host (~/.scanner_stream there), not
+    to whichever machine runs the crew, so read it locally only when it is
+    actually here and otherwise ask the map server over the mesh.
+    """
+    local = Path.home() / ".scanner_stream" / "map_cache" / "shards" / "AZ"
+    if local.is_dir():
+        return sum(1 for _ in local.glob("*.mvt.gz"))
+    try:
+        from scout_crew.tools.map_tool import _get
+
+        res = _get("/api/map/status", timeout=5.0, max_body=200_000)
+        if not res.get("ok"):
+            return 0
+        for shard in json.loads(res["body"]).get("shards", []):
+            if shard.get("state") == "AZ":
+                return int(shard.get("planet_tiles") or 0)
+    except Exception:  # noqa: BLE001 - readiness signal only
+        return 0
+    return 0
 
 
 def load_phase_config() -> Dict[str, Any]:
@@ -306,7 +341,9 @@ def apply_all_pipeline_scope() -> Dict[str, Any]:
     env_info = apply_vehicle_stack_env(cfg)
 
     # scout_crew local export for agents/CLI
-    scout_out = _DESKTOP / "scout_crew" / "output"
+    from scout_crew.hosts import output_dir
+
+    scout_out = output_dir()
     scout_out.mkdir(parents=True, exist_ok=True)
     status = manager_status_payload(cfg, marker_files=marker_files, catalog=catalog, env_info=env_info)
     (scout_out / "az_manager_status.json").write_text(
@@ -335,10 +372,7 @@ def manager_status_payload(
         marker_files = apply_location_marker_filters(cfg)
     if catalog is None:
         catalog = apply_catalog_scope(cfg)
-    map_cache_az = Path.home() / ".scanner_stream" / "map_cache" / "shards" / "AZ"
-    map_cache_tiles = 0
-    if map_cache_az.is_dir():
-        map_cache_tiles = sum(1 for _ in map_cache_az.glob("*.mvt.gz"))
+    map_cache_tiles = _az_map_cache_tiles()
     text_shard_dirs_ok = all(Path(p).is_dir() for p in paths)
     ready = (
         text_shard_dirs_ok
@@ -363,7 +397,7 @@ def manager_status_payload(
         "location_marker_filters": filters,
         "filters_applied_count": len(filters),
         "az_shard_paths": paths,
-        "az_map_cache_shard": str(map_cache_az),
+        "az_map_cache_shard": _az_map_cache_source(),
         "az_map_cache_tiles": map_cache_tiles,
         "az_filter_files": marker_files,
         "az_shard_ready": ready,
