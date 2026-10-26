@@ -37,7 +37,7 @@ os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY") or "ollama"
 os.environ["OPENAI_API_BASE"] = os.getenv("OPENAI_API_BASE") or "http://127.0.0.1:11434/v1"
 os.environ["OPENAI_BASE_URL"] = os.getenv("OPENAI_BASE_URL") or "http://127.0.0.1:11434/v1"
 os.environ.setdefault("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-os.environ["CREWAI_TRACING_ENABLED"] = os.getenv("CREWAI_TRACING_ENABLED", "true")
+os.environ["CREWAI_TRACING_ENABLED"] = os.getenv("CREWAI_TRACING_ENABLED", "false")  # local-only: no trace upload
 
 from PySide6.QtCore import QProcess, QProcessEnvironment, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QTextCursor

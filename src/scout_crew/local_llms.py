@@ -448,17 +448,25 @@ def assert_local_only() -> None:
     openai_key = os.getenv("OPENAI_API_KEY", "")
 
     def _looks_private_or_local(url: str) -> bool:
-        u = (url or "").lower()
+        # Parse the host and check it as an IP. Substring matching accepted
+        # https://anything:11434 and public 172.x hosts.
+        import ipaddress
+
+        u = (url or "").strip()
         if not u:
             return True
-        if "11434" in u:
+        if "://" not in u:
+            u = "http://" + u
+        host = (urlparse(u).hostname or "").strip().lower()
+        if host == "localhost":
             return True
-        if any(x in u for x in ("localhost", "127.0.0.1", "0.0.0.0", ".ts.net")):
+        try:
+            addr = ipaddress.ip_address(host)
+        except ValueError:
+            return False
+        if addr.is_loopback or addr.is_private or addr.is_unspecified:
             return True
-        # Tailscale CGNAT 100.64.0.0/10 and common RFC1918
-        if "://100." in u or "://10." in u or "://192.168." in u or "://172." in u:
-            return True
-        return False
+        return addr in ipaddress.ip_network("100.64.0.0/10")
 
     bases = [
         os.getenv("OPENAI_BASE_URL") or "",

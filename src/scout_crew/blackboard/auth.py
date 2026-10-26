@@ -84,7 +84,8 @@ def mint_token(
         "jti": secrets.token_hex(8),
     }
     if extra:
-        claims.update(extra)
+        reserved = set(claims)
+        claims.update({k: v for k, v in extra.items() if k not in reserved})
     payload_b64 = _b64e(json.dumps(claims, separators=(",", ":")).encode("utf-8"))
     return f"{payload_b64}.{_sign(secret, payload_b64)}"
 
@@ -117,7 +118,9 @@ def verify_token(
         raise TokenError("wrong scope")
     now_f = float(now) if now is not None else time.time()
     exp = int(claims.get("exp") or 0)
-    if exp and now_f > exp:
+    if not exp:
+        raise TokenError("token has no expiry")
+    if now_f > exp:
         raise TokenError("token expired")
     return claims
 
