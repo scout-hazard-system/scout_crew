@@ -11,8 +11,8 @@
     "state": "AZ",
     "state_name": "Arizona",
     "shard_roots": [
-      "/home/gibi/Desktop/vlm_text_map_shards/AZ",
-      "/home/gibi/Desktop/vlm_text_map_shards_chunked/AZ"
+      "${SCOUT_DATA_ROOT}/vlm_text_map_shards/AZ",
+      "${SCOUT_DATA_ROOT}/vlm_text_map_shards_chunked/AZ"
     ]
   },
   "facets": {
@@ -84,9 +84,9 @@
     ]
   },
   "catalogs": {
-    "broadcastify_channels_file": "/home/gibi/Desktop/stack/config/broadcastify_national_shards/broadcastify_channels.us.az.json",
-    "active_catalog_symlink": "/home/gibi/Desktop/stack/config/broadcastify_channels.active.json",
-    "scope_file": "/home/gibi/Desktop/stack/config/jurisdiction_scope.active.json"
+    "broadcastify_channels_file": "${SCOUT_DATA_ROOT}/stack/config/broadcastify_national_shards/broadcastify_channels.us.az.json",
+    "active_catalog_symlink": "${SCOUT_DATA_ROOT}/stack/config/broadcastify_channels.active.json",
+    "scope_file": "${SCOUT_DATA_ROOT}/stack/config/jurisdiction_scope.active.json"
   },
   "selector_defaults": {
     "state": "AZ",
