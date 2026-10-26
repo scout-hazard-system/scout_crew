@@ -20,8 +20,16 @@ Key authorization (token auth): when SCOUT_BLACKBOARD_TOKEN_SECRET is set, data
 endpoints require a category-scoped bearer token. Tokens are minted at runtime:
 
   POST /v1/keys/authorize  proof-gated (entry token) -> device-id + role-scoped token
-  POST /v1/keys/issue      master-secret (X-Scout-Admin) -> manager/CLI tokens
-  POST /v1/keys/revoke     master-secret -> revoke a token jti
+  POST /v1/keys/issue      admin secret (X-Scout-Admin) -> manager/CLI tokens
+  POST /v1/keys/revoke     admin secret -> revoke a token jti
+
+Roles /v1/keys/authorize may issue are SCOUT_BLACKBOARD_ENTRY_ROLES (CSV). The
+default is the non-admin set; a deployment whose entry token is a trusted device
+credential (e.g. the NUC's scout-bb-refresh) lists its admin roles explicitly.
+
+X-Scout-Admin is checked against SCOUT_BLACKBOARD_ADMIN_SECRET when set, so the
+token signing secret never has to travel in a header. Unset = legacy behavior
+(signing secret), kept only for compatibility.
   GET  /v1/audit           manager bearer token -> moderation/audit log + per-token volume
 
 No bootstrap or deploy-time minting. Memory mode (--memory) runs the store in
@@ -43,9 +51,13 @@ from typing import Any, Deque, Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
 from scout_crew.blackboard import auth
-from scout_crew.blackboard.store import BlackboardStore
+from scout_crew.blackboard.store import ROLE_ACL, BlackboardStore
 
 MAX_AUDIT = 2000
+MAX_BODY_BYTES = 1024 * 1024
+
+# Roles an entry-token holder may self-issue unless SCOUT_BLACKBOARD_ENTRY_ROLES says otherwise.
+DEFAULT_ENTRY_ROLES = ("alert", "intel", "vet", "rank", "core", "operator")
 
 
 class ServerState:
@@ -56,10 +68,15 @@ class ServerState:
         store: BlackboardStore,
         secret: str = "",
         entry_token: str = "",
+        admin_secret: str = "",
+        entry_roles: Optional[set] = None,
     ) -> None:
         self.store = store
         self.secret = secret
         self.entry_token = entry_token
+        # Separate admin secret when configured; legacy fallback = signing secret.
+        self.admin_secret = admin_secret or secret
+        self.entry_roles = set(entry_roles) if entry_roles else set(DEFAULT_ENTRY_ROLES)
         self.revoked: set[str] = set()
         self.audit: Deque[Dict[str, Any]] = deque(maxlen=MAX_AUDIT)
         self.volume: Dict[str, int] = {}
@@ -157,7 +174,7 @@ def make_handler(state: ServerState):
 
         def _require_admin(self) -> bool:
             """Master-secret gate (X-Scout-Admin) for issue/revoke."""
-            if not state.secret or not self._secure_eq(self.headers.get("X-Scout-Admin") or "", state.secret):
+            if not state.secret or not self._secure_eq(self.headers.get("X-Scout-Admin") or "", state.admin_secret):
                 self._reject(401, "admin secret required (X-Scout-Admin)")
                 return False
             return True
@@ -171,6 +188,9 @@ def make_handler(state: ServerState):
                 if parsed.path in {"/", "/health"}:
                     return _json_response(self, 200, {"ok": True, "service": "scout-blackboard", "auth": bool(state.secret)})
                 if parsed.path == "/v1/stats":
+                    # Stats reveal db path, hostname and volumes: token required.
+                    if self._require_token() is None:
+                        return
                     return _json_response(self, 200, state.store.stats())
                 if parsed.path == "/v1/audit":
                     claims = self._require_token()
@@ -217,7 +237,12 @@ def make_handler(state: ServerState):
 
         def do_POST(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
-            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return _json_response(self, 400, {"error": "bad content-length"})
+            if length < 0 or length > MAX_BODY_BYTES:
+                return _json_response(self, 413, {"error": "body too large"})
             raw = self.rfile.read(length) if length else b"{}"
             try:
                 payload: Dict[str, Any] = json.loads(raw.decode("utf-8") or "{}")
@@ -242,8 +267,9 @@ def make_handler(state: ServerState):
                     if not self._enforce_request(claims, role=role, category=category, action="write"):
                         return
                     meta = dict(payload.get("meta") or {})
-                    meta.setdefault("device_id", (claims.get("device_id") or ""))
-                    meta.setdefault("token_jti", (claims.get("jti") or ""))
+                    # Provenance comes from the verified token, never the request body.
+                    meta["device_id"] = claims.get("device_id") or ""
+                    meta["token_jti"] = claims.get("jti") or ""
                     write_payload = dict(payload)
                     write_payload["meta"] = meta
                     entry = state.store.write(**write_payload)
@@ -268,20 +294,26 @@ def make_handler(state: ServerState):
                 if not entry_proof or not self._secure_eq(entry_proof, state.entry_token):
                     state.log("deny", why="bad_entry_proof", ip=_client_ip(self, state))
                     return _json_response(self, 401, {"error": "invalid entry proof"})
-            elif not entry_proof and not captcha:
-                # Framework seam: production forwards a signed proof from the
-                # in-app web mirror (captcha + network presence). Without the
-                # entry token configured we require at least a proof marker so
-                # authorize is never a password-less bearer faucet.
-                return _json_response(self, 401, {"error": "entry proof required"})
+            else:
+                # Without an entry token there is no proof to check: an arbitrary
+                # captcha string used to pass here. Fail closed.
+                del captcha
+                return _json_response(self, 503, {"error": "device onboarding disabled; set SCOUT_BLACKBOARD_ENTRY_TOKEN"})
             sent_device = str(payload.get("device_id") or "").strip()
             device_id = sent_device or uuid.uuid4().hex
-            role = str(payload.get("role") or self._default_role()).strip().lower() or "operator"
+            role = state.store.normalize_role(str(payload.get("role") or self._default_role())) or "operator"
+            if role not in state.entry_roles:
+                state.log("deny", why="authorize_role_not_allowed", role=role, ip=_client_ip(self, state))
+                return _json_response(self, 403, {"error": f"role '{role}' cannot self-onboard; use /v1/keys/issue"})
             categories = [
                 str(c).strip().lower()
                 for c in (payload.get("categories") or ["pipeline"])
                 if str(c).strip()
             ] or ["pipeline"]
+            for cat in categories:
+                acl = ROLE_ACL.get(state.store.normalize_category(cat), {})
+                if role not in acl.get("read", ()) and role not in acl.get("write", ()):
+                    return _json_response(self, 400, {"error": f"role '{role}' has no access to category '{cat}'"})
             ttl = max(60, min(int(payload.get("ttl") or 3600), 86400))
             token = auth.mint_token(
                 state.secret,
@@ -389,6 +421,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--secret", default=os.getenv("SCOUT_BLACKBOARD_TOKEN_SECRET", ""))
     p.add_argument("--entry-token", default=os.getenv("SCOUT_BLACKBOARD_ENTRY_TOKEN", ""))
+    p.add_argument("--admin-secret", default=os.getenv("SCOUT_BLACKBOARD_ADMIN_SECRET", ""))
+    p.add_argument(
+        "--entry-roles",
+        default=os.getenv("SCOUT_BLACKBOARD_ENTRY_ROLES", ""),
+        help="CSV roles /v1/keys/authorize may issue (default: " + ",".join(DEFAULT_ENTRY_ROLES) + ")",
+    )
     p.add_argument(
         "--sandbox-writers",
         default=os.getenv("SCOUT_BLACKBOARD_SANDBOX_WRITERS", ""),
@@ -402,12 +440,19 @@ def main(argv: list[str] | None = None) -> int:
             "SCOUT_BLACKBOARD_ALLOW_NOAUTH=1 to accept an unauthenticated network blackboard."
         )
         return 2
+    if args.secret and args.admin_secret and args.admin_secret == args.secret:
+        print("scout blackboard: SCOUT_BLACKBOARD_ADMIN_SECRET must differ from the token signing secret.")
+        return 2
     db = Path(args.db).expanduser() if args.db else None
     sandbox_writers = None
     if args.sandbox_writers.strip():
         sandbox_writers = [w.strip() for w in args.sandbox_writers.split(",") if w.strip()]
     store = BlackboardStore(db_path=db, memory=args.memory, sandbox_writers=sandbox_writers)
-    state = ServerState(store, secret=args.secret, entry_token=args.entry_token)
+    entry_roles = {r.strip().lower() for r in args.entry_roles.split(",") if r.strip()} or None
+    state = ServerState(
+        store, secret=args.secret, entry_token=args.entry_token,
+        admin_secret=args.admin_secret, entry_roles=entry_roles,
+    )
     try:
         httpd = ThreadingHTTPServer((args.host, args.port), make_handler(state))
     except OSError as exc:
@@ -415,6 +460,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"scout blackboard listening on http://{args.host}:{args.port}")
     print(f"db={store.db_path} mode={'memory' if store.memory else 'file'}")
+    print(f"entry_roles={sorted(state.entry_roles)} admin_secret={'separate' if args.admin_secret else 'legacy(signing secret)'}")
     print(f"auth={'enabled' if state.secret else 'disabled'} sandbox_writers={sorted(store.sandbox_writers) if store.sandbox_writers is not None else 'acl-only'}")
     try:
         httpd.serve_forever()

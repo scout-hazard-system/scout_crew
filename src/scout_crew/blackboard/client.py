@@ -172,7 +172,7 @@ class BlackboardClient:
             "categories": list(categories),
             "device_id": device_id,
             "ttl": ttl,
-        }, headers={"X-Scout-Admin": secret})
+        }, headers={"X-Scout-Admin": os.getenv("SCOUT_BLACKBOARD_ADMIN_SECRET", "") or secret})
 
     def revoke(self, jti: str, *, admin_secret: str = "") -> Dict[str, Any]:
         secret = admin_secret or os.getenv("SCOUT_BLACKBOARD_TOKEN_SECRET", "") or ""
@@ -180,7 +180,7 @@ class BlackboardClient:
             if not secret:
                 raise RuntimeError("SCOUT_BLACKBOARD_TOKEN_SECRET unset")
             return {"ok": True, "revoked_jti": jti, "mode": "local"}
-        return self._http("POST", "/v1/keys/revoke", {"jti": jti}, headers={"X-Scout-Admin": secret})
+        return self._http("POST", "/v1/keys/revoke", {"jti": jti}, headers={"X-Scout-Admin": os.getenv("SCOUT_BLACKBOARD_ADMIN_SECRET", "") or secret})
 
     def audit(self, *, limit: int = 200, admin_secret: str = "") -> Dict[str, Any]:
         """Manager-moderated audit log + per-token volume (flood watch)."""

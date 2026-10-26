@@ -25,8 +25,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 import os as _os
-_os.environ.setdefault("CREWAI_TRACING_ENABLED", "true")
-if _os.getenv("CREWAI_TRACING_ENABLED", "true").lower() in {"1", "true", "yes", "on"}:
+_os.environ.setdefault("CREWAI_TRACING_ENABLED", "false")  # local-only: no trace upload
+if _os.getenv("CREWAI_TRACING_ENABLED", "false").lower() in {"1", "true", "yes", "on"}:
     _os.environ["CREWAI_TRACING_ENABLED"] = "true"
 
 from scout_crew.arizona_phase import manager_phase_prompt_block
